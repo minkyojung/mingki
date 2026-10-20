@@ -24,7 +24,8 @@ import java.util.List;
 
 /**
  * 기동 시 data/business/*.json 을 읽어 비어 있는 업무 테이블에 넣는다.
- * 샘플 업무 데이터의 원천은 JSON 하나뿐이다. 이미 행이 있는 테이블은 건드리지 않는다.
+ * 샘플 업무 데이터의 원천은 JSON 하나뿐이다. 기동 때는 이미 행이 있는 테이블을 건드리지 않는다.
+ * 시연 리셋(reseed)은 세 테이블을 비우고 다시 넣는다.
  * source · note 는 정답 힌트라 DB 에 넣지 않는다. 그 밖의 모르는 필드는 기동 오류로 잡는다.
  */
 @Component
@@ -65,6 +66,20 @@ public class BusinessDataLoader implements ApplicationRunner {
             log.warn("업무 데이터 폴더가 없어 시드를 건너뜀: {}", dir.toAbsolutePath());
             return;
         }
+        loadProducts();
+        loadRules();
+        loadContracts();
+    }
+
+    /** 세 업무 테이블을 비우고 JSON 에서 다시 넣는다. 호출한 쪽 트랜잭션에 참여한다. */
+    @Transactional(rollbackFor = Exception.class)
+    public void reseed() throws IOException {
+        if (!Files.isDirectory(dir)) {
+            throw new IllegalStateException("업무 데이터 폴더가 없습니다: " + dir.toAbsolutePath());
+        }
+        jdbc.update("delete from loan_contracts");
+        jdbc.update("delete from product_rules");
+        jdbc.update("delete from products");
         loadProducts();
         loadRules();
         loadContracts();

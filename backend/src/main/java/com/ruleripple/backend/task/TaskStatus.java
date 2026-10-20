@@ -26,13 +26,14 @@ public enum TaskStatus {
     /**
      * Agent 이벤트로 옮길 수 있는 다음 상태. 같은 상태는 언제나 허용한다.
      * WAITING_* 에서 나가는 전이는 사람이 승인 API 로만 한다.
+     * EXTRACTING → LOCATING 은 요건 확정 없이 영향 찾기로 가는 단순화 흐름이다 (docs/SIMPLIFICATION.md).
      */
     public boolean agentCanMoveTo(TaskStatus next) {
         if (next == this) return true;
         if (isTerminal()) return false;
         if (next == FAILED) return true;
         return switch (this) {
-            case EXTRACTING -> next == WAITING_REQUIREMENT_APPROVAL || next == NO_CHANGE;
+            case EXTRACTING -> next == WAITING_REQUIREMENT_APPROVAL || next == LOCATING || next == NO_CHANGE;
             case LOCATING -> next == DESIGNING;
             case DESIGNING -> next == VERIFYING;
             case VERIFYING -> next == DESIGNING || next == LOCATING || next == WAITING_REVIEW;

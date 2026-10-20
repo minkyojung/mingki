@@ -22,8 +22,13 @@ class TaskStatusTest {
     }
 
     @Test
-    void agentCannotSkipApproval() {
-        assertThat(EXTRACTING.agentCanMoveTo(LOCATING)).isFalse();
+    void simplifiedFlowSkipsRequirementApproval() {
+        assertThat(EXTRACTING.agentCanMoveTo(LOCATING)).isTrue();
+        assertThat(EXTRACTING.agentCanMoveTo(DESIGNING)).isFalse();
+    }
+
+    @Test
+    void agentCannotSkipReview() {
         assertThat(VERIFYING.agentCanMoveTo(PUBLISHING)).isFalse();
     }
 

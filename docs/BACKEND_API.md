@@ -56,6 +56,8 @@ EXTRACTING ─▶ WAITING_REQUIREMENT_APPROVAL ─(확정)─▶ LOCATING ─▶
                                                                                   어디서든 오류 ▶ FAILED
 ```
 
+단순화 흐름([SIMPLIFICATION.md](./SIMPLIFICATION.md))에서는 요건 확정 없이 `EXTRACTING ─▶ LOCATING`으로 바로 간다. 두 흐름 모두 허용한다.
+
 `GET /tasks/{id}`의 `pendingAction`이 지금 사람이 할 일을 알려준다 (`{step, role, path}` 또는 `null`).
 라우터 가드는 이 값과 `status`만 보면 된다.
 
@@ -78,6 +80,7 @@ EXTRACTING ─▶ WAITING_REQUIREMENT_APPROVAL ─(확정)─▶ LOCATING ─▶
 | `getEvaluation(id)` | `GET /api/ai/tasks/{id}/evaluation` | | `{task, evaluation}` |
 | (폴링) | `GET /api/ai/tasks/{id}/events?after={seq}` | | `{seq, type, payload, createdAt}[]` |
 | (SSE) | `GET /api/ai/tasks/{id}/stream?access_token={jwt}` | `Last-Event-ID` 또는 `?after=` | `event: {type}` / `data: {seq,type,payload}` |
+| `resetDemo()` | `POST /api/demo/reset` | | `{tasks, jobs, workTickets, products, productRules, loanContracts}` — 작업 기록을 지우고 업무 데이터를 `data/business` JSON으로 되돌린다. 계정은 남긴다. `DEMO_RESET_ENABLED=false`면 404 |
 
 ### 승인 규칙 (서버가 검사)
 

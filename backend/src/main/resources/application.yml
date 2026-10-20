@@ -64,3 +64,6 @@ ruleripple:
   business-data:
     # 기동 시 비어 있는 products · product_rules · loan_contracts 에 넣을 JSON 폴더. bootRun 은 backend/ 에서 실행된다
     dir: ${BUSINESS_DATA_DIR:../data/business}
+  demo:
+    # POST /api/demo/reset 허용. 업무 데이터와 작업 기록을 처음 상태로 되돌린다 (시연용)
+    reset-enabled: ${DEMO_RESET_ENABLED:true}

@@ -56,6 +56,7 @@ Agent 없이 띄우면 작업이 곧바로 `FAILED (Agent 호출 실패)`가 된
 | `INTERNAL_TOKEN` | rr-internal-dev-token | `/internal/**` 헤더 `X-Internal-Token` |
 | `JWT_SECRET` | (시연용) | 32바이트 이상 |
 | `JOB_FAILURE_RATE` | 0.3 | 큐 워커 실패 주입 확률 (시연용) |
+| `DEMO_RESET_ENABLED` | true | `POST /api/demo/reset`(시연 리셋) 허용. 운영에서는 false |
 | `BUSINESS_DATA_DIR` | ../data/business | 업무 시드 JSON 폴더. docker에서는 `/data/business`로 마운트 |
 
 ## 패키지
@@ -70,6 +71,7 @@ com.ruleripple.backend
 ├─ internal/  InternalTaskController(Agent 콜백) · AgentResultService · InternalBusinessController(business-mcp)
 │             ApprovalGuard(쓰기 도구 검증) · Product · ProductRule · LoanContract · WorkTicket
 │             BusinessDataLoader(data/business JSON 시드)
+├─ demo/      DemoController · DemoResetService (시연 리셋)
 ├─ queue/     Job · JobPublisher(멱등키) · JobWorker(재시도 · DLQ) · JobController
 ├─ config/    SecurityConfig · RabbitConfig · RestClientConfig · RuleRippleProperties
 └─ common/    ApiExceptionHandler
