@@ -126,7 +126,7 @@ def diff_versions(regulation_id: str, old_version: str, new_version: str, root: 
 def search(query: str, regulation_id: str, version: str, root: Path = REGULATIONS_DIR) -> list[dict]:
     """키워드 검색. 공백으로 나눈 단어가 모두 제목이나 본문에 있는 조항.
 
-    TODO(데이터 팀원 Vector DB): 의미 검색이 준비되면 여기만 교체한다. 반환 형식은 그대로 둔다.
+    search_regulation은 vector.search(의미 검색)를 쓰고, 이 함수는 의미 검색을 쓸 수 없을 때의 대체 수단이다.
     """
     terms = query.split()
     if not terms:

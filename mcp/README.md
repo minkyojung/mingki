@@ -53,7 +53,7 @@ async with Client("http://code-mcp:8002/mcp") as c:
 
 - `change`: `added` · `removed` · `modified`. 표현만 바뀐 조항도 나온다 (실질 여부는 Agent가 판단).
 - 조항 ID: `15`, `15-2`(제15조의2), `supp-2`(부칙 제2조). Agent `app/data.py` 와 같은 규칙.
-- `search_regulation` 은 지금 키워드 검색(공백으로 나눈 단어 모두 포함). Vector DB가 준비되면 반환 형식은 그대로 두고 내부만 바꾼다.
+- `search_regulation` 은 의미 검색(Vector DB): 조항 1개 = 조각 1개, OpenAI `text-embedding-3-small` + 프로세스 안 Chroma, 관련도 순 최대 5개. `OPENAI_API_KEY` 가 없거나 임베딩 호출이 실패하면 키워드 검색(단어 모두 포함)으로 대체한다. 색인 규칙은 `docs/VECTOR_INDEX.md`.
 
 ### code-mcp
 
@@ -100,6 +100,6 @@ async with Client("http://code-mcp:8002/mcp") as c:
 ## 남은 일
 
 - [ ] 실제 샘플 코드 레포로 교체 (`mcp/sample_repo` 는 Agent mock 위치에 맞춘 임시본) → compose `SAMPLE_REPO_DIR` 마운트만 바꾸면 된다
-- [ ] `search_regulation` 을 Vector DB 검색으로 교체
+- [x] `search_regulation` 을 Vector DB 검색으로 교체
 - [ ] test_agent가 실행 가능한 테스트(`code`)를 내도록 Agent와 합의
 - [ ] 실제 백엔드와 연결 확인 (`docker compose up`)

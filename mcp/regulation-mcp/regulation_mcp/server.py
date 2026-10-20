@@ -12,6 +12,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ResourceError, ToolError
 
 from regulation_mcp import regulations as reg
+from regulation_mcp import vector
 from regulation_mcp.regulations import RegulationError
 
 mcp = FastMCP(
@@ -51,18 +52,20 @@ def diff_versions(regulation_id: str, old_version: str, new_version: str) -> dic
 
 @mcp.tool(annotations={"readOnlyHint": True})
 def search_regulation(query: str, regulation_id: str = "credit-loan-ops", version: str = "v4") -> list[dict]:
-    """규정 조항 검색. 공백으로 나눈 단어가 모두 제목이나 본문에 있는 조항을 돌려준다.
+    """규정 조항 의미 검색. 질문과 뜻이 가까운 조항을 관련도 순으로 최대 5개 돌려준다.
+
+    원문에 없는 표현으로 물어도 된다 (예: "노인으로 보는 나이"). 버전 하나 안에서만 찾는다.
 
     Args:
-        query: 검색어 (예: "고령자", "DSR 한도")
+        query: 질문이나 검색어 (예: "고령자로 보는 나이 기준", "DSR 한도")
         regulation_id: 규정 ID
         version: 버전 (예: "v4")
 
     Returns:
-        [{uri, article_id, title, text}]
+        [{uri, article_id, title, text}] 관련도 순
     """
     try:
-        return reg.search(query, regulation_id, version)
+        return vector.search(query, regulation_id, version)
     except RegulationError as e:
         raise _tool_error(e) from e
 

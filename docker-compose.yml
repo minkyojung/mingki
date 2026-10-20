@@ -67,6 +67,7 @@ services:
     build: ./mcp/regulation-mcp
     environment:
       REGULATIONS_DIR: /data/regulations
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}   # 의미 검색용 임베딩. 없으면 키워드 검색으로 대체
     volumes:
       - ./data/regulations:/data/regulations:ro
 

@@ -1,0 +1,91 @@
+# search_regulation 검색 평가셋 (Agent에 노출 금지)
+#
+# 각 질의를 search_regulation(query, version, k=3)으로 실행하고 결과를 채점한다.
+#   expected      : 이 중 하나라도 상위 k개 안에 있으면 hit
+#   not_top1      : 1위로 나오면 안 되는 조항 (같은 숫자 · 비슷한 단어 함정)
+# 지표: recall@3, MRR, not_top1 위반 건수
+#
+# 조항 ID 규칙은 data/regulations/README.md. 실행: eval/run_retrieval.py
+
+k: 3
+
+regulation:
+  - id: Q01
+    query: 고령자로 보는 나이 기준
+    version: v4
+    expected: ["15"]
+    not_top1: ["7"]
+  - id: Q02
+    query: DSR 상한 비율
+    version: v4
+    expected: ["8"]
+    not_top1: ["10"]
+  - id: Q03
+    query: 주택담보대출 담보인정비율 기준
+    version: v4
+    expected: ["10"]
+    not_top1: ["8"]
+  - id: Q04
+    query: 소득 추정할 때 남은 근로기간 계산
+    version: v4
+    expected: ["7"]
+    not_top1: ["15"]
+  - id: Q05
+    query: 시행일 전에 신청한 대출에 적용할 기준
+    version: v4
+    expected: ["supp-2"]
+  - id: Q06
+    query: 고령자에게 계약 전에 설명하고 기록을 보관해야 하는지
+    version: v4
+    expected: ["15-2"]
+  - id: Q07
+    query: 고령자 금리 우대와 중도상환수수료 면제
+    version: v4
+    expected: ["16"]
+  - id: Q08
+    query: 대출 신청 화면에 표시해야 하는 항목
+    version: v4
+    expected: ["17"]
+  - id: Q09
+    query: 기존 대출 기간을 연장할 때 적용하는 기준
+    version: v4
+    expected: ["supp-2", "12"]
+  - id: Q10
+    query: 대출을 신청할 수 있는 최소 나이
+    version: v4
+    expected: ["4"]
+    not_top1: ["15"]
+  - id: Q11
+    query: 고령자로 보는 나이 기준
+    version: v3
+    expected: ["15"]
+    not_top1: ["7"]
+    note: 버전 필터 확인. 결과에 v4 조항이 섞이면 실패
+  - id: Q12
+    query: 신규 개정 규정은 언제부터 시행되는지
+    version: v4
+    expected: ["supp-1"]
+
+  # 바꿔 쓴 질의: 원문 단어를 피해서 키워드 검색과 의미 검색의 차이를 본다
+  - id: Q13
+    query: 노인으로 분류되는 연령
+    version: v4
+    expected: ["15"]
+    not_top1: ["7"]
+    type: paraphrase
+  - id: Q14
+    query: 벌이에 비해 빚 갚는 돈이 얼마까지 허용되나
+    version: v4
+    expected: ["8"]
+    not_top1: ["10"]
+    type: paraphrase
+  - id: Q15
+    query: 어르신 고객이 조건을 이해했는지 확인하는 절차
+    version: v4
+    expected: ["15-2"]
+    type: paraphrase
+  - id: Q16
+    query: 예전 기준 그대로 처리되는 대출
+    version: v4
+    expected: ["supp-2"]
+    type: paraphrase
