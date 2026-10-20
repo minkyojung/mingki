@@ -8,7 +8,13 @@ Agent가 쓰는 도구 서버 3개. 설계는 [docs/PROJECT.md](../docs/PROJECT.
 | code-mcp | `http://code-mcp:8002/mcp` | 샘플 레포(`SAMPLE_REPO_DIR`) 만 |
 | business-mcp | `http://business-mcp:8003/mcp` | Spring `/internal/**` 응답 만 |
 
-`eval/` · `docs/` 는 어느 서버도 읽지 못한다. compose에서도 각 서버에 필요한 폴더만 읽기 전용으로 마운트한다.
+`eval/` · `docs/` 는 어느 서버도 읽지 못한다. 막는 곳은 두 겹이다.
+
+1. 코드: 모든 경로 입력을 허용 폴더 기준으로 검사한다 (`../` · 절대 경로 · 바깥 심볼릭 링크 · `path_glob` 거절, 규정은 `{id}/v{N}.md` 형식만).
+2. compose: 각 서버에 필요한 폴더만 읽기 전용으로 마운트한다. 컨테이너 안에는 `eval/` · `docs/` 가 아예 없다.
+
+`check_patch` 는 Agent가 보낸 코드(패치 · 테스트)를 pytest로 **실행**하므로 1번으로는 막을 수 없다 (절대 경로로 파일을 열 수 있음).
+그래서 컨테이너 안에서만 돌고, 로컬에서는 `RR_ALLOW_LOCAL_SANDBOX=1` 일 때만 허용한다. **Agent와 연결할 때는 반드시 Docker로 띄운다.**
 
 ## 실행 · 테스트
 

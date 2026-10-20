@@ -8,6 +8,9 @@
 
 테스트: 샌드박스에서 pytest. test_cases 중 "code"(pytest 소스)가 있는 것만 실행 파일로 만들고,
 나머지는 실행할 수 없어서 건너뛴 수로만 알린다.
+
+격리: pytest는 Agent가 보낸 코드를 실제로 실행하므로 경로 검사로는 eval/ · docs/ 를 막을 수 없다.
+그래서 컨테이너 안(레포 전체가 없는 곳)에서만 돌리고, 로컬은 RR_ALLOW_LOCAL_SANDBOX=1 일 때만 허용한다.
 """
 
 import json
@@ -25,6 +28,7 @@ import yaml
 from code_mcp.repo import SAMPLE_REPO_DIR, SKIP_DIRS, RepoError, safe_path
 
 TEST_TIMEOUT_SEC = 60
+CONTAINER_MARKERS = (Path("/.dockerenv"), Path("/run/.containerenv"))  # Docker · Podman
 _HUNK = re.compile(r"^@@ (.+?):(\d+) @@\s*$")
 
 
@@ -211,8 +215,19 @@ def run_tests(repo: Path) -> tuple[bool, list[str]]:
 
 # ---------- check_patch ----------
 
+def require_isolation() -> None:
+    """컨테이너 밖에서는 Agent 코드를 실행하지 않는다 (로컬 파일시스템 전체가 보이므로)."""
+    if any(m.exists() for m in CONTAINER_MARKERS) or os.environ.get("RR_ALLOW_LOCAL_SANDBOX") == "1":
+        return
+    raise PatchError(
+        "check_patch는 Docker 안에서만 실행합니다 (docker compose up code-mcp). "
+        "로컬 개발용으로는 RR_ALLOW_LOCAL_SANDBOX=1"
+    )
+
+
 def check_patch(patches: list[dict], test_cases: list[dict], root: Path = SAMPLE_REPO_DIR) -> dict:
     """묶음별(개별) 검증 + 통과한 묶음을 모두 합친 통합 검증."""
+    require_isolation()
     results, applicable = [], []
     for p in patches:
         bundle_id = p.get("bundle_id") or "?"

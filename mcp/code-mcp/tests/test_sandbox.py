@@ -1,7 +1,10 @@
 import hashlib
 
+import pytest
+
+from code_mcp import sandbox
 from code_mcp.repo import SAMPLE_REPO_DIR, iter_files
-from code_mcp.sandbox import check_patch
+from code_mcp.sandbox import PatchError, check_patch
 
 SENIOR = {"bundle_id": "B:src/loan/eligibility.py",
           "diff": "@@ src/loan/eligibility.py:21 @@\n-return age >= 65\n+return age >= 60"}
@@ -85,3 +88,18 @@ def test_multiple_hunks_in_one_file_apply_bottom_up():
     diff = ("@@ src/loan/eligibility.py:8 @@\n-SENIOR_AGE_MONTHS = 780\n+SENIOR_AGE_MONTHS = 720\n"
             "@@ src/loan/eligibility.py:21 @@\n-return age >= 65\n+return age >= 60")
     assert check_patch([{"bundle_id": "B:e", "diff": diff}], [])["results"][0]["ok"] is True
+
+
+def test_sandbox_refuses_outside_container(monkeypatch, tmp_path):
+    # Agent 테스트 코드가 절대 경로로 eval/answer_key.md 를 읽을 수 있으므로 로컬에서는 실행 자체를 막는다.
+    monkeypatch.delenv("RR_ALLOW_LOCAL_SANDBOX")
+    monkeypatch.setattr(sandbox, "CONTAINER_MARKERS", (tmp_path / "no-dockerenv",))
+    with pytest.raises(PatchError, match="Docker"):
+        check_patch([SENIOR], [])
+
+
+def test_sandbox_runs_inside_container(monkeypatch, tmp_path):
+    monkeypatch.delenv("RR_ALLOW_LOCAL_SANDBOX")
+    (tmp_path / ".dockerenv").touch()
+    monkeypatch.setattr(sandbox, "CONTAINER_MARKERS", (tmp_path / ".dockerenv",))
+    assert check_patch([SENIOR], [])["system"]["ok"] is True
