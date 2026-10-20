@@ -29,3 +29,8 @@ description = "A Vitest test fails: the change broke behaviour a test pins down.
 name = "build"
 command = "pnpm -C frontend build"
 description = "The production build fails."
+
+[[scripts.check]]
+name = "backend"
+command = "backend/gradlew -p backend build --console=plain -q"
+description = "The backend fails to compile or a JUnit test fails (`./gradlew build` in backend/)."
