@@ -86,7 +86,7 @@ public class TaskController {
         List<ChangeSpec> specs = service.changeSpecs(id);
         int targets = (int) specs.stream().filter(ChangeSpec::isTarget).count();
         Counts counts = new Counts(reqs.size(), targets, specs.size() - targets,
-                TaskService.latestPatches(service.patches(id)).size(), service.testCases(id).size());
+                TaskService.currentPatches(service.patches(id), service.excludedSpecKeys(id)).size(), service.testCases(id).size());
         return new TaskDetail(TaskSummary.of(t), t.getErrorMessage(), MAX_VERIFY_ROUNDS,
                 service.documents(id).stream().map(DocumentMeta::of).toList(),
                 PendingAction.of(t.getStatus(), t.getId()), counts,
@@ -129,7 +129,7 @@ public class TaskController {
     public PatchesResponse patches(@PathVariable UUID id) {
         AnalysisTask t = service.get(id);
         List<CodePatch> all = service.patches(id);
-        List<CodePatch> latest = TaskService.latestPatches(all);
+        List<CodePatch> latest = TaskService.currentPatches(all, service.excludedSpecKeys(id));
         Set<Long> latestIds = latest.stream().map(CodePatch::getId).collect(java.util.stream.Collectors.toSet());
         int passed = (int) latest.stream().filter(p -> p.getVerifyStatus() == CodePatch.VerifyStatus.PASSED).count();
         int failed = (int) latest.stream().filter(p -> p.getVerifyStatus() == CodePatch.VerifyStatus.FAILED).count();

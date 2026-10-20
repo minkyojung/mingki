@@ -8,6 +8,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -19,7 +20,7 @@ import java.util.UUID;
  *  2. step = REVIEW, decision = APPROVE
  *  3. 그 작업의 가장 최근 REVIEW 결정 (이후 수정 요청·거절로 뒤집히지 않음)
  *  4. 작업 상태 = PUBLISHING
- *  5. 대상 specKey 가 승인 시 제외 목록에 없음
+ *  5. 대상 specKey 가 수정 요청으로 제외한 위치(누적)가 아님
  */
 @Component
 public class ApprovalGuard {
@@ -40,7 +41,8 @@ public class ApprovalGuard {
         if (a.getStep() != Approval.Step.REVIEW || a.getDecision() != Approval.Decision.APPROVE) {
             throw forbidden("검토·승인(REVIEW/APPROVE) 기록이 아닙니다");
         }
-        Approval latestReview = approvals.findByTaskIdOrderByIdAsc(taskId).stream()
+        List<Approval> history = approvals.findByTaskIdOrderByIdAsc(taskId);
+        Approval latestReview = history.stream()
                 .filter(x -> x.getStep() == Approval.Step.REVIEW)
                 .reduce((first, second) -> second)
                 .orElseThrow();
@@ -51,10 +53,9 @@ public class ApprovalGuard {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "작업 상태가 PUBLISHING 이 아닙니다 (현재 " + task.getStatus() + ")");
         }
         if (specKeys != null && !specKeys.isEmpty()) {
-            Object raw = a.getPayload().get("excludedSpecKeys");
-            List<?> excluded = raw instanceof List<?> l ? l : List.of();
+            Set<String> excluded = TaskService.excludedSpecKeys(history);
             List<String> blocked = specKeys.stream().filter(excluded::contains).toList();
-            if (!blocked.isEmpty()) throw forbidden("승인 시 제외된 위치입니다: " + blocked);
+            if (!blocked.isEmpty()) throw forbidden("수정 요청으로 제외한 위치입니다: " + blocked);
         }
         return a;
     }

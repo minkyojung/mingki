@@ -149,6 +149,33 @@ public class TaskService {
         return new ArrayList<>(latest.values());
     }
 
+    /**
+     * 현재 패치 = latestPatches 에서 위치가 전부 제외된 패치를 뺀 것.
+     * Agent 는 재설계 때 제외된 위치의 패치를 다시 만들지 않으므로, 예전 회차 행이 남아 있어도 현재 패치가 아니다.
+     */
+    public static List<CodePatch> currentPatches(List<CodePatch> all, Set<String> excluded) {
+        return latestPatches(all).stream()
+                .filter(p -> p.getSpecKeys().isEmpty() || !excluded.containsAll(p.getSpecKeys()))
+                .toList();
+    }
+
+    /** 수정 요청(REVIEW · REQUEST_CHANGES)으로 제외한 위치의 누적. */
+    @Transactional(readOnly = true)
+    public Set<String> excludedSpecKeys(UUID taskId) {
+        return excludedSpecKeys(approvals.findByTaskIdOrderByIdAsc(taskId));
+    }
+
+    public static Set<String> excludedSpecKeys(List<Approval> history) {
+        Set<String> out = new LinkedHashSet<>();
+        for (Approval a : history) {
+            if (a.getStep() != Approval.Step.REVIEW || a.getDecision() != Approval.Decision.REQUEST_CHANGES) continue;
+            if (a.getPayload().get("excludedSpecKeys") instanceof Collection<?> keys) {
+                keys.forEach(k -> out.add(String.valueOf(k)));
+            }
+        }
+        return out;
+    }
+
     // ===================== interrupt ① 요건 확정 (OFFICER) =====================
 
     public record RequirementDecision(Long requirementId, Requirement.Status decision) {}
@@ -205,28 +232,34 @@ public class TaskService {
         }
         AnalysisTask task = lockAndExpect(taskId, TaskStatus.WAITING_REVIEW);
         List<String> excluded = excludedSpecKeys == null ? List.of() : List.copyOf(excludedSpecKeys);
+        if (!excluded.isEmpty() && decision != Approval.Decision.REQUEST_CHANGES) {
+            throw bad("위치를 제외하려면 수정 요청(REQUEST_CHANGES)을 쓰세요. 제외한 뒤 다시 설계 · 검증합니다");
+        }
+        Set<String> alreadyExcluded = excludedSpecKeys(taskId);
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("excludedSpecKeys", excluded);
 
         switch (decision) {
             case APPROVE -> {
-                // 제외하지 않은 패치만 publish 대상. 그중 검증을 통과하지 못한 패치가 있으면 차단 (예외 없음).
-                List<CodePatch> targets = latestPatches(patches.findByTaskIdOrderByRoundAscIdAsc(taskId)).stream()
-                        .filter(p -> p.getSpecKeys().isEmpty() || !excluded.containsAll(p.getSpecKeys()))
-                        .toList();
-                if (targets.isEmpty()) throw conflict("승인할 패치가 없습니다. 전부 제외하려면 REJECT 를 쓰세요");
+                // 현재 패치가 전부 검증을 통과해야 승인한다 (예외 없음).
+                List<CodePatch> targets = currentPatches(patches.findByTaskIdOrderByRoundAscIdAsc(taskId), alreadyExcluded);
+                if (targets.isEmpty()) throw conflict("승인할 패치가 없습니다. 전부 버리려면 REJECT 를 쓰세요");
                 List<String> notPassed = targets.stream()
                         .filter(p -> p.getVerifyStatus() != CodePatch.VerifyStatus.PASSED)
                         .map(p -> p.getBundle() + ":" + p.getFilePath() + "(" + p.getVerifyStatus() + ")")
                         .toList();
                 if (!notPassed.isEmpty()) {
                     throw conflict("검증을 통과하지 못한 패치가 있어 승인할 수 없습니다: " + notPassed
-                            + " — 해당 위치를 제외하거나 수정 요청하세요");
+                            + " — 수정 요청으로 해당 위치를 제외하거나 고치세요");
                 }
                 payload.put("approvedPatchIds", targets.stream().map(CodePatch::getId).toList());
             }
             case REQUEST_CHANGES -> {
-                if (comment == null || comment.isBlank()) throw bad("수정 요청에는 comment 가 필요합니다");
+                // 제외만 하는 수정 요청은 comment 없이 받는다. Agent 는 영향 없는 패치를 재사용할 수 있다.
+                if (excluded.isEmpty() && (comment == null || comment.isBlank())) {
+                    throw bad("수정 요청에는 comment 나 excludedSpecKeys 가 필요합니다");
+                }
+                validateExclusion(taskId, excluded, alreadyExcluded);
+                payload.put("excludedSpecKeys", excluded);
             }
             default -> { /* REJECT */ }
         }
@@ -244,6 +277,19 @@ public class TaskService {
     }
 
     // ===================== helpers =====================
+
+    /** 제외할 위치는 이 작업의 변경 대상이고, 아직 제외되지 않은 것이어야 한다. */
+    private void validateExclusion(UUID taskId, List<String> excluded, Set<String> alreadyExcluded) {
+        if (excluded.isEmpty()) return;
+        Set<String> targets = new HashSet<>();
+        for (ChangeSpec c : changeSpecs.findByTaskIdOrderByIdAsc(taskId)) {
+            if (c.isTarget()) targets.add(c.getSpecKey());
+        }
+        List<String> unknown = excluded.stream().filter(k -> !targets.contains(k)).toList();
+        if (!unknown.isEmpty()) throw bad("이 작업의 변경 대상이 아닌 위치: " + unknown);
+        List<String> repeated = excluded.stream().filter(alreadyExcluded::contains).toList();
+        if (!repeated.isEmpty()) throw bad("이미 제외한 위치: " + repeated);
+    }
 
     private AnalysisTask lockAndExpect(UUID taskId, TaskStatus expected) {
         AnalysisTask task = tasks.findForUpdate(taskId)

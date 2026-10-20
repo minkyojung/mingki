@@ -23,7 +23,7 @@ Vue ──(/api/**, JWT)──▶ Spring ──(/run, /resume)──▶ Agent �
 | 폴링 vs SSE | 둘 다 된다. MVP는 `GET /tasks/{id}` + `GET /tasks/{id}/events?after=` 폴링으로 충분. SSE는 `/stream?access_token=` (EventSource는 헤더를 못 보냄). |
 | ① 요건 확정에서 내용 수정이 되나? | 확정 · 보류만. |
 | ② "수정함"은 코드 직접 수정인가? | MVP는 코멘트로 수정 요청 (`REQUEST_CHANGES`). Agent가 반영하고 verify를 다시 돈다. |
-| 검증 실패 패치의 publish 차단 예외? | 없음. 서버가 409로 막는다. 해당 위치를 `excludedSpecKeys`로 빼고 승인하거나 수정 요청한다. |
+| 검증 실패 패치의 publish 차단 예외? | 없음. 서버가 409로 막는다. 수정 요청(`REQUEST_CHANGES`)으로 고치거나, `excludedSpecKeys`로 위치를 빼고 다시 설계 · 검증한다. |
 | 규정 파일 형식 | `.md` / `.markdown` / `.txt`, UTF-8, 파일당 1MB 이하. |
 | 작업 티켓은 어디에 생기나? | 백엔드 `work_tickets` 테이블 (Jira 대신). 링크는 `/tickets/{id}`, 참조는 `RR-{id}`. |
 | 명세서 출력 형식 | `GET /tasks/{id}/report`의 `report.markdown`. 화면 렌더링 + 다운로드. |
@@ -72,8 +72,8 @@ EXTRACTING ─▶ WAITING_REQUIREMENT_APPROVAL ─(확정)─▶ LOCATING ─▶
 | `getRequirements(id)` | `GET /api/ai/tasks/{id}/requirements` | | `{task, documents, requirements[]}` — 요건마다 `oldText` · `newText` (신·구 원문) |
 | `approveRequirements(id, d)` | `POST /api/ai/tasks/{id}/requirements/approval` | `{decisions:[{requirementId, decision:"CONFIRMED"\|"HELD"}], comment?}` — **모든 요건**에 결정 필요 | `Approval` |
 | `getChangeSpecs(id)` | `GET /api/ai/tasks/{id}/change-specs` | | `{task, targets[], nonTargets[]}` — 대상 아님도 `reason` 포함 |
-| `getPatches(id)` | `GET /api/ai/tasks/{id}/patches` | | `{task, maxVerifyRounds, latestRound, passed, failed, pending, canApprove, patches[], testCases[]}` — `patches`는 회차 전체, 현재 것은 `latest:true` |
-| `reviewPatches(id, d)` | `POST /api/ai/tasks/{id}/review` | `{decision:"APPROVE"\|"REJECT"\|"REQUEST_CHANGES", comment?, excludedSpecKeys?}` — 수정 요청은 comment 필수 | `Approval` |
+| `getPatches(id)` | `GET /api/ai/tasks/{id}/patches` | | `{task, maxVerifyRounds, latestRound, passed, failed, pending, canApprove, patches[], testCases[]}` — `patches`는 회차 전체, 현재 것은 `latest:true` (수정 요청으로 제외한 위치만 다루는 패치는 현재 패치가 아니다) |
+| `reviewPatches(id, d)` | `POST /api/ai/tasks/{id}/review` | `{decision:"APPROVE"\|"REJECT"\|"REQUEST_CHANGES", comment?, excludedSpecKeys?}` — `excludedSpecKeys`는 수정 요청 전용 (APPROVE · REJECT에 주면 400). 수정 요청은 comment나 excludedSpecKeys 중 하나 필수 | `Approval` |
 | `getReport(id)` | `GET /api/ai/tasks/{id}/report` | | `{task, report, deliveries[]}` |
 | `getEvaluation(id)` | `GET /api/ai/tasks/{id}/evaluation` | | `{task, evaluation}` |
 | (폴링) | `GET /api/ai/tasks/{id}/events?after={seq}` | | `{seq, type, payload, createdAt}[]` |
@@ -84,7 +84,7 @@ EXTRACTING ─▶ WAITING_REQUIREMENT_APPROVAL ─(확정)─▶ LOCATING ─▶
 | 단계 | 누가 | 언제 | 검사 |
 |---|---|---|---|
 | ① 요건 확정 | OFFICER | `WAITING_REQUIREMENT_APPROVAL` | 모든 요건에 CONFIRMED/HELD. 하나라도 확정 → `LOCATING`, 전부 보류 → `HELD` |
-| ② 검토 · 승인 | DEVELOPER | `WAITING_REVIEW` | APPROVE: 제외하지 않은 현재 패치가 **전부 PASSED**여야 함 (아니면 409). `canApprove`가 같은 판단을 미리 알려준다 |
+| ② 검토 · 승인 | DEVELOPER | `WAITING_REVIEW` | APPROVE: 현재 패치가 **전부 PASSED**여야 함 (아니면 409). 위치 제외는 수정 요청으로만 하고, 제외는 작업 안에서 누적된다. 이 작업의 변경 대상이 아니거나 이미 제외한 위치를 다시 주면 400. `canApprove`가 같은 판단을 미리 알려준다 |
 
 ### 주요 객체
 
@@ -147,7 +147,7 @@ POST {AGENT_BASE_URL}/resume
 
 `/resume`의 payload
 - REQUIREMENTS: `{decisions:[{requirementId, reqKey, decision}], confirmedReqKeys:[…]}`
-- REVIEW: `{excludedSpecKeys:[…], approvedPatchIds:[…]}` (APPROVE일 때만 approvedPatchIds)
+- REVIEW: APPROVE면 `{approvedPatchIds:[…]}`, REQUEST_CHANGES면 `{excludedSpecKeys:[…]}`, REJECT면 `{}`
 
 ### Agent → Spring (`{callbackBaseUrl}` 아래)
 
@@ -197,7 +197,7 @@ POST /internal/jobs              ← code-mcp create_draft_pr
 1. `approvalId`가 같은 작업의 REVIEW/APPROVE 기록
 2. 그 작업의 **가장 최근** REVIEW 결정 (이후 수정 요청 · 거절로 뒤집히지 않음)
 3. 작업 상태가 `PUBLISHING`
-4. `specKeys`가 승인 때 제외한 위치가 아님
+4. `specKeys`가 수정 요청으로 제외한 위치(작업 전체 누적)가 아님
 
 같은 `idempotencyKey`로 다시 오면 새로 만들지 않고 기존 `jobId`를 `duplicate:true`로 돌려준다.
 publish 노드는 `GET /internal/jobs/{jobId}`로 `DONE`/`DEAD`를 기다린 뒤 report로 간다.
