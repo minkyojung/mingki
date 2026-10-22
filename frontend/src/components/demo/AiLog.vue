@@ -19,17 +19,18 @@ defineProps<{ log: AiLog }>()
       <ChevronRightIcon class="size-4 transition-transform group-data-[state=open]:rotate-90" />
     </CollapsibleTrigger>
     <CollapsibleContent>
-      <Card class="mt-3 py-4">
-        <CardContent class="space-y-2.5 px-4">
+      <Card class="mt-3 rounded-2xl py-5 ring-foreground/5">
+        <CardContent class="space-y-3 px-5">
           <p class="flex gap-2">
-            <CheckIcon class="mt-0.5 size-4 shrink-0" />바뀐 조항 {{ log.requirementCount }}곳을
-            찾았어요
+            <CheckIcon class="mt-0.5 size-4 shrink-0 text-brand" stroke-width="2.5" />바뀐 조항
+            {{ log.requirementCount }}곳을 찾았어요
           </p>
           <p class="flex gap-2">
-            <CheckIcon class="mt-0.5 size-4 shrink-0" />상품 {{ log.productCount }}개를 확인했어요
+            <CheckIcon class="mt-0.5 size-4 shrink-0 text-brand" stroke-width="2.5" />상품
+            {{ log.productCount }}개를 확인했어요
           </p>
           <div class="flex gap-2">
-            <CheckIcon class="mt-0.5 size-4 shrink-0" />
+            <CheckIcon class="mt-0.5 size-4 shrink-0 text-brand" stroke-width="2.5" />
             <div class="flex-1">
               <template v-if="log.lookups.length">
                 판단에 필요한 다른 규정 {{ log.lookups.length }}곳을 직접 골라 읽었어요
@@ -46,7 +47,7 @@ defineProps<{ log: AiLog }>()
             </div>
           </div>
           <p class="flex gap-2">
-            <CheckIcon class="mt-0.5 size-4 shrink-0" />
+            <CheckIcon class="mt-0.5 size-4 shrink-0 text-brand" stroke-width="2.5" />
             {{
               log.allPassed
                 ? '수정안을 검사했어요 · 모두 통과'

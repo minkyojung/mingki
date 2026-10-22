@@ -1,4 +1,4 @@
-# Rule Ripple · Frontend
+# Dumbo · Frontend
 
 Vue 3 + Vite + TypeScript + Tailwind CSS v4 + shadcn-vue
 

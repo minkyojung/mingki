@@ -1,7 +1,9 @@
 <script setup lang="ts">
 /** 시연 화면 한 페이지: 시작 → AI 작업 중 → 확인 → (반영 중) → 완료. 흐름은 useDemo, 화면 계산은 lib/briefing */
+import { RotateCcwIcon } from '@lucide/vue'
 import { computed, onMounted } from 'vue'
 
+import logoUrl from '@/assets/logo.png'
 import DoneView from '@/components/demo/DoneView.vue'
 import ReviewView from '@/components/demo/ReviewView.vue'
 import RunningView from '@/components/demo/RunningView.vue'
@@ -75,21 +77,33 @@ const running = computed((): { title: string; steps: Step[] } => {
 </script>
 
 <template>
-  <div class="min-h-svh bg-muted">
-    <header class="mx-auto flex h-14 max-w-xl items-center px-5">
-      <span class="font-semibold">Rule Ripple</span>
-      <Button
-        variant="ghost"
-        size="sm"
-        class="ml-auto text-muted-foreground"
-        :disabled="busy"
-        @click="reset"
-      >
-        초기화
-      </Button>
+  <div class="relative min-h-svh bg-background">
+    <!-- 위쪽에만 아주 옅게 번지는 브랜드 색 -->
+    <div
+      aria-hidden="true"
+      class="pointer-events-none absolute inset-x-0 top-0 h-96 bg-[radial-gradient(60%_100%_at_50%_0%,var(--color-brand-soft),transparent)]"
+    />
+
+    <header class="sticky top-0 z-10 border-b border-border/60 bg-background/75 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-xl items-center px-5">
+        <span class="flex items-center">
+          <img :src="logoUrl" alt="" class="h-6 w-auto select-none" draggable="false" />
+          <span class="sr-only">Dumbo</span>
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="ml-auto rounded-full px-3 text-muted-foreground"
+          :disabled="busy"
+          @click="reset"
+        >
+          <RotateCcwIcon />
+          초기화
+        </Button>
+      </div>
     </header>
 
-    <main class="mx-auto max-w-xl px-5 pb-36">
+    <main class="relative mx-auto max-w-xl px-5" :class="{ 'pb-40': phase === 'review' }">
       <Alert
         v-if="error && phase !== 'failed' && phase !== 'review'"
         variant="destructive"
@@ -98,13 +112,16 @@ const running = computed((): { title: string; steps: Step[] } => {
         <AlertDescription>{{ error }}</AlertDescription>
       </Alert>
 
-      <div v-if="phase === 'loading'" class="pt-20"><Spinner class="size-8" /></div>
+      <div v-if="phase === 'loading'" class="stage items-center">
+        <Spinner class="size-7 text-brand" />
+      </div>
       <StartView v-else-if="phase === 'start'" :busy="busy" @start="start" />
       <RunningView
         v-else-if="phase === 'running' || phase === 'publishing'"
         :title="running.title"
         :seconds="seconds"
         :steps="running.steps"
+        :mode="phase === 'publishing' ? 'applying' : 'reading'"
       />
       <ReviewView
         v-else-if="phase === 'review'"
@@ -122,14 +139,22 @@ const running = computed((): { title: string; steps: Step[] } => {
         :busy="busy"
         @restart="reset"
       />
-      <section v-else-if="phase === 'failed'" class="space-y-6 pt-20">
+      <section v-else-if="phase === 'failed'" class="stage gap-6">
         <Alert variant="destructive">
           <AlertTitle>작업을 이어갈 수 없어요</AlertTitle>
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
         <div class="grid grid-cols-2 gap-2">
-          <Button variant="outline" size="lg" :disabled="busy" @click="retry">다시 시도</Button>
-          <Button size="lg" :disabled="busy" @click="reset">초기화</Button>
+          <Button
+            variant="outline"
+            size="lg"
+            class="h-12 rounded-xl"
+            :disabled="busy"
+            @click="retry"
+          >
+            다시 시도
+          </Button>
+          <Button size="lg" class="h-12 rounded-xl" :disabled="busy" @click="reset">초기화</Button>
         </div>
       </section>
     </main>
