@@ -191,6 +191,11 @@ def definition_followers(requirement, rules):
     return out
 
 
+def scope_article_uris(context):
+    """적용 범위를 정한 조항(제목에 "적용 범위")의 uri. 새 의무의 보류가 적용 범위 때문인지 가릴 때 쓴다."""
+    return {a["uri"] for a in context if re.search(r"적용\s*범위", a.get("title") or "")}
+
+
 def sale_ended_basis(context):
     """판매 중단 상품의 관리를 정한 조항 uri (유지 판정의 근거). 없으면 빈 목록."""
     return [a["uri"] for a in context if _SALE_ENDED_ARTICLE.search(a.get("text") or "")][:1]

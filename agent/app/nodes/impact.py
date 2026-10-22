@@ -6,7 +6,8 @@ from app.data import active_rules, unended_rules
 from app.lookups import MAX_LOOKUPS, run_lookups
 from app.tools.base import recorder_of, recording
 from app.validation import (applied_new_rule, change_problem, changeable_rules, definition_followers, definition_without_rule,
-                            excluded_by_age, exemption_needs_customer_data, ground_conditions, condition_errors, sale_ended_basis)
+                            excluded_by_age, exemption_needs_customer_data, ground_conditions, condition_errors, sale_ended_basis,
+                            scope_article_uris)
 
 
 def code_checks(model_reason, reason):
@@ -51,6 +52,7 @@ def make_product_impact_agent(tools, reasoner):
                 found, missing = run_lookups(belt, lookups, related, {a["uri"] for a in context})
                 context, data_gaps = context + found, data_gaps + missing
         articles = {a["uri"] for a in context}
+        scope_uris = scope_article_uris(context)
         candidates = defaultdict(list)
         req_ids = {r.id for r in state["requirements"]}
         for item in reasoner.product_impacts(state["requirements"], products, rules, context, documents, data_gaps):
@@ -131,6 +133,15 @@ def make_product_impact_agent(tools, reasoner):
                     evidence_ids = [rid for rid in evidence_ids if rid not in target_ids]
                     basis = list(dict.fromkeys(basis + ([req.article_ref] if req.article_ref in articles else [])))
                     impact = "change_required"
+                    if applicability == "unknown":
+                        applicability = "all"
+                # 새 의무의 보류는 적용 범위가 불확실할 때만이다 (13번 원칙 · OUTPUT_SPEC 2절). 적용 범위 조항을 근거로
+                # 들지 않았고 이 상품의 자료가 빠진 것도 없으면, "절차가 충분한지 모르겠다"는 보류라 변경 필요로 돌린다
+                product_gaps = [gap for gap in data_gaps if pid in str(gap)]
+                if (req.change == "added" and not kept and impact == "needs_review" and len(rows) == 1
+                        and not product_gaps and not (set(basis) & scope_uris)):
+                    impact, target_ids = "change_required", []
+                    reason += " / 적용 범위가 아니라 절차 유무를 이유로 한 보류라 변경 필요 (새 규칙은 코드가 만든다)"
                     if applicability == "unknown":
                         applicability = "all"
                 # 바꿀 수 있는 규칙이 없으면 상품 규칙은 유지다. 차주별 조건 확인은 심사 절차의 일이다

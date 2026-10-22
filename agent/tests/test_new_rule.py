@@ -27,9 +27,11 @@ class ExplanationReasoner(DsrReasoner):
 
     def product_impacts(self, requirements, products, rules, *args):
         verdicts = {"P005": "no_change", "P009": "needs_review"}
+        # 보류(P009)는 적용 범위 조항을 근거로 든다 (프롬프트 13번). 적용 범위가 아닌 보류는 코드가 변경 필요로 돌린다
+        basis = {"P009": ["reg://credit-loan-ops/v4/3", "reg://credit-loan-ops/v4/15-2"]}
         return [ProductAssessment(requirement_id="REQ-15-2", product_id=p["productId"],
                                   impact=verdicts.get(p["productId"], "change_required"), target_rule_ids=[],
-                                  basis_refs=["reg://credit-loan-ops/v4/15-2"], applicability="all",
+                                  basis_refs=basis.get(p["productId"], ["reg://credit-loan-ops/v4/15-2"]), applicability="all",
                                   scope="시행일 이후 체결하는 계약", reason="고령자 설명 확인 의무 신설") for p in products]
 
 
@@ -84,6 +86,28 @@ class HedgingReasoner(ExplanationReasoner):
             if item.product_id == "P005":
                 item.impact, item.applicability, item.reason = "needs_review", "unknown", "고령자 해당 여부를 확정할 수 없음"
         return out
+
+
+class ProcedureHedgingReasoner(ExplanationReasoner):
+    """P006 은 절차 충족을 단정할 수 없다며, P009 는 적용 범위 조항을 들어 보류하는 모델."""
+
+    def product_impacts(self, requirements, products, rules, *args):
+        out = super().product_impacts(requirements, products, rules, *args)
+        for item in out:
+            if item.product_id == "P006":
+                item.impact, item.applicability, item.reason = "needs_review", "unknown", "현재 절차가 새 의무를 충족하는지 단정할 수 없음"
+                item.basis_refs = ["reg://credit-loan-ops/v4/15-2", "reg://credit-loan-ops/v4/15"]
+            if item.product_id == "P009":
+                item.basis_refs = ["reg://credit-loan-ops/v4/3", "reg://credit-loan-ops/v4/15-2"]
+        return out
+
+
+def test_review_on_a_new_obligation_counts_only_when_it_cites_the_scope_article():
+    out = AgentRunner(build_graph(LocalTools(), ProcedureHedgingReasoner())).start("T1", "credit-loan-ops", article_ids=["15-2"])
+    impacts = {i.product_id: i for i in out["product_impacts"]}
+    assert impacts["P006"].impact == "change_required" and "절차 유무" in impacts["P006"].reason
+    assert impacts["P009"].impact == "needs_review"      # 적용 범위 조항을 근거로 든 보류는 그대로
+    assert any(p.product_id == "P006" and p.changes for p in out["proposals"])
 
 
 def test_product_whose_max_age_is_below_the_senior_threshold_is_kept():
