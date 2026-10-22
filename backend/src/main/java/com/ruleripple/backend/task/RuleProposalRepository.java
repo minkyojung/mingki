@@ -7,7 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface RuleProposalRepository extends JpaRepository<RuleProposal, Long> {
-    List<RuleProposal> findByTaskIdOrderByProposalKeyAscRoundAsc(UUID taskId);
+    List<RuleProposal> findByTaskIdOrderByProposalKeyAscVersionAscRoundAsc(UUID taskId);
 
-    Optional<RuleProposal> findByTaskIdAndProposalKeyAndRound(UUID taskId, String proposalKey, int round);
+    Optional<RuleProposal> findByTaskIdAndProposalKeyAndVersionAndRound(UUID taskId, String proposalKey, int version, int round);
 }
