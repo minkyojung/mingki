@@ -266,8 +266,28 @@ def test_rule_above_old_limit_is_not_the_same_limit():
     assert verdict == "needs_review" and "R073" in note
 
 
-def test_sale_ended_product_goes_to_review():
-    assert change_problem(DSR_REQ, rule("R079", "DSR_LIMIT", "0.40"), {"status": "SALE_ENDED"})[0] == "needs_review"
+def test_sale_ended_product_is_kept():
+    verdict, note = change_problem(DSR_REQ, rule("R079", "DSR_LIMIT", "0.40"), {"status": "SALE_ENDED"})
+    assert verdict == "no_change" and "판매가 끝난" in note
+
+
+def test_senior_threshold_and_age_exclusion_come_from_rules_and_regulation_text():
+    from app.validation import excluded_by_age, senior_threshold, sale_ended_basis
+    context = [{"uri": "reg://credit-loan-ops/v4/15", "text": '이 기준에서 "고령자"란 신청일 현재 만 60세 이상인 자를 말한다.'},
+               {"uri": "reg://credit-loan-ops/v4/21", "text": "판매가 중단된 상품은 신규로 취급하지 아니하며, 기존 계약의 관리만 한다."}]
+    added = Requirement(id="REQ-15-2", article_id="15-2", article="제15조의2", article_ref="reg://credit-loan-ops/v4/15-2",
+                        change="added", summary="고령자 설명 확인 의무 신설", target="Senior explanation-required",
+                        new_text="은행은 고령자와 대출 계약을 체결하기 전에 설명하고 이해했는지 확인해야 한다.")
+    youth = [rule("R045", "ELIGIBLE_MIN_AGE", "19", "age"), rule("R046", "ELIGIBLE_MAX_AGE", "34", "age")]
+    senior = [rule("R010", "ELIGIBLE_MIN_AGE", "65", "age")]
+
+    assert senior_threshold(context) == (60, "reg://credit-loan-ops/v4/15")
+    age_rule, uri, note = excluded_by_age(added, youth, context)
+    assert age_rule["ruleId"] == "R046" and uri == "reg://credit-loan-ops/v4/15" and "만 60세" in note
+    assert excluded_by_age(added, senior, context) is None               # 상한이 없으면 고령자와 계약할 수 있다
+    assert excluded_by_age(DSR_REQ, youth, context) is None              # 새 조항이 아니면 보지 않는다
+    assert excluded_by_age(added, youth, context[1:]) is None            # 정의 조항이 없으면 확정하지 않는다
+    assert sale_ended_basis(context) == ["reg://credit-loan-ops/v4/21"]
 
 
 def test_non_limit_requirement_is_not_judged_by_numbers():
@@ -288,7 +308,10 @@ def test_wrong_targets_from_real_run_are_filtered_before_proposal():
     impacts = {i.product_id: i for i in out["product_impacts"]}
     assert impacts["P001"].impact == "change_required" and impacts["P001"].target_rule_ids == ["R001"]
     assert impacts["P004"].impact == "no_change" and "R037" in impacts["P004"].evidence_rule_ids
-    assert impacts["P010"].impact == "needs_review" and impacts["P012"].impact == "needs_review"
+    assert impacts["P010"].impact == "needs_review"
+    # 판매가 끝난 상품은 정답지대로 유지. 고른 규칙은 근거로 남고 판매 중단 조항이 붙는다
+    assert impacts["P012"].impact == "no_change" and "R079" in impacts["P012"].evidence_rule_ids
+    assert "reg://credit-loan-ops/v4/21" in impacts["P012"].basis_refs
     assert {c.rule_id for p in out["proposals"] for c in p.changes} == {"R001"}
 
 

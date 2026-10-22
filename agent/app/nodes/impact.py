@@ -5,8 +5,8 @@ from app.schemas import Event, ProductImpact, ProductAssessment
 from app.data import active_rules, unended_rules
 from app.lookups import MAX_LOOKUPS, run_lookups
 from app.tools.base import recorder_of, recording
-from app.validation import (applied_new_rule, change_problem, changeable_rules, exemption_needs_customer_data,
-                            ground_conditions, condition_errors)
+from app.validation import (applied_new_rule, change_problem, changeable_rules, excluded_by_age,
+                            exemption_needs_customer_data, ground_conditions, condition_errors, sale_ended_basis)
 
 
 def code_checks(model_reason, reason):
@@ -88,10 +88,7 @@ def make_product_impact_agent(tools, reasoner):
                             # 새로 생긴 조항은 기존 규칙이 따를 수 없다. 엉뚱한 기존 규칙을 빼면 변경 필요는 새 규칙으로 간다
                     if impact == "change_required" and not target_ids and req.change == "added":
                         applied = applied_new_rule(req, [r for r in catalog if r["productId"] == pid], catalog)
-                        if product.get("status") == "SALE_ENDED":  # 기존 규칙 변경과 같은 기준 (change_problem)
-                            impact = "needs_review"
-                            reason += " / 판매가 끝난 상품이라 새 규칙 대신 확인 필요"
-                        elif applied:  # 같은 의무가 이미 반영돼 있다 (다시 분석해도 새 규칙이 또 생기지 않는다)
+                        if applied:  # 같은 의무가 이미 반영돼 있다 (다시 분석해도 새 규칙이 또 생기지 않는다)
                             impact = "no_change"
                             evidence_ids = list(dict.fromkeys(evidence_ids + [applied["ruleId"]]))
                             reason += f" / 이미 {applied['ruleKey']} 규칙이 있음({applied['ruleId']}, {applied['effectiveFrom']}부터)"
@@ -104,6 +101,22 @@ def make_product_impact_agent(tools, reasoner):
                 scope = row.scope if len(rows) == 1 else "적용 범위 추가 확인"
                 applicability = row.applicability if len(rows) == 1 else "unknown"
                 conditions = row.conditions if len(rows) == 1 else []
+
+                # 자료로 확정되는 유지. 판매가 끝난 상품은 새 계약이 없고, 새 고령자 의무는 신청 나이 상한이
+                # 고령자 기준보다 낮은 상품과 무관하다. 모델이 뭐라고 했든 유지로 두고 근거 조항 · 규칙을 붙인다
+                kept = None
+                if product.get("status") == "SALE_ENDED":
+                    kept = ("판매가 끝난 상품이라 새 계약이 없어 유지 (기간 연장은 계약 당시 기준)", sale_ended_basis(context), [])
+                elif (excluded := excluded_by_age(req, list(by_product[pid].values()), context)):
+                    age_rule, definition_uri, note = excluded
+                    kept = (note, [definition_uri], [age_rule["ruleId"]])
+                if kept:
+                    note, kept_basis, kept_evidence = kept
+                    if impact != "no_change":
+                        reason += " / " + note
+                    evidence_ids = list(dict.fromkeys(evidence_ids + target_ids + kept_evidence))
+                    basis = list(dict.fromkeys(basis + kept_basis))
+                    target_ids, conditions, impact, applicability = [], [], "no_change", "excluded"
                 # 바꿀 수 있는 규칙이 없으면 상품 규칙은 유지다. 차주별 조건 확인은 심사 절차의 일이다
                 changeable = changeable_rules(req, list(by_product[pid].values()), product)
                 if impact == "no_change" and changeable and exemption_needs_customer_data(req, list(by_product[pid].values())):
