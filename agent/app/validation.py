@@ -54,7 +54,7 @@ def change_problem(requirement, rule, product):
     바꿀 필요가 없다는 것이 확실하면 no_change, 아니면 needs_review로 사람에게 넘긴다.
     """
     if product.get("status") == "SALE_ENDED":
-        return "needs_review", f"{rule['ruleId']}: 판매가 끝난 상품이라 기준 변경 대신 확인 필요"
+        return "no_change", f"{rule['ruleId']}: 판매가 끝난 상품이라 새 계약이 없어 기준을 바꾸지 않음 (기간 연장은 계약 당시 기준)"
     basis, changed = rule.get("basisArticles") or [], article_key(requirement.article_ref)
     if basis and changed and changed not in basis:  # 같은 숫자 · 같은 단어여도 다른 조항을 따르는 규칙은 이 개정과 무관하다
         return "needs_review", f"{rule['ruleId']} {rule['ruleKey']}: {', '.join(basis)}를 따르는 규칙이라 이번 개정({changed})과 무관해 확인 필요"
@@ -110,6 +110,95 @@ def new_rule_errors(requirement, change, rules, catalog=()):
     if same:
         errors.append(f"{change.rule_key}: 이미 규칙 {', '.join(same)}가 있어(반영 예정 포함) 새 규칙이 아닙니다")
     return errors
+
+
+_SENIOR_DEF = re.compile(r"고령자[\"”']?\s*(?:란|이란|라\s*함은)[^\n]*?만\s*(\d+)\s*세\s*이상")
+_SALE_ENDED_ARTICLE = re.compile(r"판매가?\s*중단된\s*상품")
+
+
+def senior_threshold(context):
+    """규정 컨텍스트의 고령자 정의(만 N세 이상)와 그 조항 uri. 정의 조항이 없으면 None."""
+    for article in context:
+        match = _SENIOR_DEF.search(article.get("text") or "")
+        if match:
+            return int(match.group(1)), article["uri"]
+    return None
+
+
+def excluded_by_age(requirement, rules, context):
+    """새로 생긴 고령자 의무인데 신청 나이 상한이 고령자 기준보다 낮은 상품. (상한 규칙, 정의 조항 uri, 이유) 또는 None.
+
+    그 상품은 고령자와 계약하지 않으므로 의무를 적용할 거래가 없다. 상품 규칙과 규정 원문만 쓴다.
+    """
+    text = f"{requirement.new_text or ''} {requirement.summary or ''}"
+    if requirement.change != "added" or "고령자" not in text:
+        return None
+    found = senior_threshold(context)
+    if not found:
+        return None
+    threshold, uri = found
+    for rule in rules:
+        if rule.get("unit") != "age" or "MAX_AGE" not in (rule.get("ruleKey") or ""):
+            continue
+        try:
+            limit = int(Decimal(rule["value"]))
+        except InvalidOperation:
+            continue
+        if limit < threshold:
+            return rule, uri, (f"{rule['ruleId']} {rule['ruleKey']}={limit}: 신청 나이 상한이 고령자 기준(만 {threshold}세)보다 "
+                               "낮아 고령자와 계약하지 않음")
+    return None
+
+
+_DEFINITION = re.compile(r"(?:란|이란|라\s*함은)\s*[^\n]*?(?:말한다|한다)")
+
+
+def definition_without_rule(requirement, rules):
+    """정의가 바뀐 요건(예: "고령자"란 … 말한다)인데 그 조항을 따르는 규칙(basisArticles)이 상품에 없으면 그 이유. 아니면 None.
+
+    정의는 그것을 값으로 쓰는 규칙이 있을 때만 상품 규칙에 영향을 준다. 근거 조항이 비어 있는 규칙이 그 정의의
+    단위(예: 나이)로 돼 있으면 그 규칙이 정의를 따를 수도 있으므로 확정하지 않는다.
+    """
+    if requirement.change != "modified" or not _DEFINITION.search(requirement.new_text or ""):
+        return None
+    article = article_key(requirement.article_ref)
+    if not article or any(article in (rule.get("basisArticles") or []) for rule in rules):
+        return None
+    unknown_units = {rule.get("unit") for rule in rules if not rule.get("basisArticles")}
+    if any(expected_value(requirement, unit) is not None for unit in unknown_units):
+        return None
+    return f"{article}의 정의를 따르는 규칙이 이 상품에 없음 (근거 조항 기준)"
+
+
+def definition_followers(requirement, rules):
+    """정의가 바뀐 요건에서 그 조항을 따르고(basisArticles) 옛 정의 값을 그대로 가진 규칙. 정의와 함께 새 값으로 바뀌어야 한다.
+
+    "더 엄격한 기준은 완화하지 않는다"는 한도 규칙의 원칙이다. 정의를 그대로 옮겨 적은 규칙은 한도가 아니라 정의다.
+    """
+    if requirement.change != "modified" or not _DEFINITION.search(requirement.new_text or ""):
+        return []
+    article = article_key(requirement.article_ref)
+    before = requirement.model_copy(update={"new_text": requirement.old_text})
+    out = []
+    for rule in rules:
+        if article not in (rule.get("basisArticles") or []):
+            continue
+        new, old = expected_value(requirement, rule["unit"]), expected_value(before, rule["unit"])
+        if new is None or old is None or same_value(new, old):
+            continue
+        if same_value(rule["value"], old):
+            out.append(rule)
+    return out
+
+
+def scope_article_uris(context):
+    """적용 범위를 정한 조항(제목에 "적용 범위")의 uri. 새 의무의 보류가 적용 범위 때문인지 가릴 때 쓴다."""
+    return {a["uri"] for a in context if re.search(r"적용\s*범위", a.get("title") or "")}
+
+
+def sale_ended_basis(context):
+    """판매 중단 상품의 관리를 정한 조항 uri (유지 판정의 근거). 없으면 빈 목록."""
+    return [a["uri"] for a in context if _SALE_ENDED_ARTICLE.search(a.get("text") or "")][:1]
 
 
 def applied_new_rule(requirement, rules, catalog=()):

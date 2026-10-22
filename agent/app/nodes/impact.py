@@ -5,8 +5,9 @@ from app.schemas import Event, ProductImpact, ProductAssessment
 from app.data import active_rules, unended_rules
 from app.lookups import MAX_LOOKUPS, run_lookups
 from app.tools.base import recorder_of, recording
-from app.validation import (applied_new_rule, change_problem, changeable_rules, exemption_needs_customer_data,
-                            ground_conditions, condition_errors)
+from app.validation import (applied_new_rule, change_problem, changeable_rules, definition_followers, definition_without_rule,
+                            excluded_by_age, exemption_needs_customer_data, ground_conditions, condition_errors, sale_ended_basis,
+                            scope_article_uris)
 
 
 def code_checks(model_reason, reason):
@@ -51,6 +52,7 @@ def make_product_impact_agent(tools, reasoner):
                 found, missing = run_lookups(belt, lookups, related, {a["uri"] for a in context})
                 context, data_gaps = context + found, data_gaps + missing
         articles = {a["uri"] for a in context}
+        scope_uris = scope_article_uris(context)
         candidates = defaultdict(list)
         req_ids = {r.id for r in state["requirements"]}
         for item in reasoner.product_impacts(state["requirements"], products, rules, context, documents, data_gaps):
@@ -88,10 +90,7 @@ def make_product_impact_agent(tools, reasoner):
                             # 새로 생긴 조항은 기존 규칙이 따를 수 없다. 엉뚱한 기존 규칙을 빼면 변경 필요는 새 규칙으로 간다
                     if impact == "change_required" and not target_ids and req.change == "added":
                         applied = applied_new_rule(req, [r for r in catalog if r["productId"] == pid], catalog)
-                        if product.get("status") == "SALE_ENDED":  # 기존 규칙 변경과 같은 기준 (change_problem)
-                            impact = "needs_review"
-                            reason += " / 판매가 끝난 상품이라 새 규칙 대신 확인 필요"
-                        elif applied:  # 같은 의무가 이미 반영돼 있다 (다시 분석해도 새 규칙이 또 생기지 않는다)
+                        if applied:  # 같은 의무가 이미 반영돼 있다 (다시 분석해도 새 규칙이 또 생기지 않는다)
                             impact = "no_change"
                             evidence_ids = list(dict.fromkeys(evidence_ids + [applied["ruleId"]]))
                             reason += f" / 이미 {applied['ruleKey']} 규칙이 있음({applied['ruleId']}, {applied['effectiveFrom']}부터)"
@@ -104,6 +103,47 @@ def make_product_impact_agent(tools, reasoner):
                 scope = row.scope if len(rows) == 1 else "적용 범위 추가 확인"
                 applicability = row.applicability if len(rows) == 1 else "unknown"
                 conditions = row.conditions if len(rows) == 1 else []
+
+                # 자료로 확정되는 유지. 판매가 끝난 상품은 새 계약이 없고, 새 고령자 의무는 신청 나이 상한이
+                # 고령자 기준보다 낮은 상품과 무관하며, 바뀐 정의는 그것을 따르는 규칙이 있는 상품에만 영향을 준다.
+                # 모델이 뭐라고 했든 유지로 두고 근거 조항 · 규칙을 붙인다
+                kept = None
+                product_rules = list(by_product[pid].values())
+                if product.get("status") == "SALE_ENDED":
+                    kept = ("판매가 끝난 상품이라 새 계약이 없어 유지 (기간 연장은 계약 당시 기준)", sale_ended_basis(context), [])
+                elif (excluded := excluded_by_age(req, product_rules, context)):
+                    age_rule, definition_uri, note = excluded
+                    kept = (note, [definition_uri], [age_rule["ruleId"]])
+                elif (note := definition_without_rule(req, product_rules)):
+                    kept = (note, [req.article_ref] if req.article_ref in articles else [], [])
+                if kept:
+                    note, kept_basis, kept_evidence = kept
+                    if impact != "no_change":
+                        reason += " / " + note
+                    evidence_ids = list(dict.fromkeys(evidence_ids + target_ids + kept_evidence))
+                    basis = list(dict.fromkeys(basis + kept_basis))
+                    target_ids, conditions, impact, applicability = [], [], "no_change", "excluded"
+                # 바뀐 정의를 그대로 옮겨 적은 규칙(그 조항을 따르고 옛 값을 가진 규칙)은 정의와 함께 바뀐다.
+                # "더 엄격한 기준은 완화하지 않는다"는 한도의 원칙이지 정의의 원칙이 아니다
+                followers = [] if kept else definition_followers(req, product_rules)
+                if followers and set(r["ruleId"] for r in followers) != set(target_ids):
+                    names = ", ".join(f"{r['ruleId']} {r['ruleKey']}={r['value']}" for r in followers)
+                    reason += f" / {names}: {req.article}의 정의를 따르는 규칙이라 정의와 함께 바뀜"
+                    target_ids = [r["ruleId"] for r in followers]
+                    evidence_ids = [rid for rid in evidence_ids if rid not in target_ids]
+                    basis = list(dict.fromkeys(basis + ([req.article_ref] if req.article_ref in articles else [])))
+                    impact = "change_required"
+                    if applicability == "unknown":
+                        applicability = "all"
+                # 새 의무의 보류는 적용 범위가 불확실할 때만이다 (13번 원칙 · OUTPUT_SPEC 2절). 적용 범위 조항을 근거로
+                # 들지 않았고 이 상품의 자료가 빠진 것도 없으면, "절차가 충분한지 모르겠다"는 보류라 변경 필요로 돌린다
+                product_gaps = [gap for gap in data_gaps if pid in str(gap)]
+                if (req.change == "added" and not kept and impact == "needs_review" and len(rows) == 1
+                        and not product_gaps and not (set(basis) & scope_uris)):
+                    impact, target_ids = "change_required", []
+                    reason += " / 적용 범위가 아니라 절차 유무를 이유로 한 보류라 변경 필요 (새 규칙은 코드가 만든다)"
+                    if applicability == "unknown":
+                        applicability = "all"
                 # 바꿀 수 있는 규칙이 없으면 상품 규칙은 유지다. 차주별 조건 확인은 심사 절차의 일이다
                 changeable = changeable_rules(req, list(by_product[pid].values()), product)
                 if impact == "no_change" and changeable and exemption_needs_customer_data(req, list(by_product[pid].values())):

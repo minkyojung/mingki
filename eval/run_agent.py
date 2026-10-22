@@ -134,7 +134,9 @@ def print_summary(summary, scenario):
             print(f"{r['run']:<4}  {r['status']} ({r['seconds']}초) {r.get('error') or ''}")
             continue
         core = r["result"]["core"]
-        cells = [f"{core[n]['ok']}건" if n in COUNT_METRICS else f"{core[n]['ok']}/{core[n]['total']}" for n in names]
+        # 회차마다 지표 집합이 다를 수 있다 (예: 변경 대상을 하나도 못 찾으면 값 · 단위 지표가 없다). 없으면 "-"
+        cells = ["-" if n not in core else f"{core[n]['ok']}건" if n in COUNT_METRICS else f"{core[n]['ok']}/{core[n]['total']}"
+                 for n in names]
         print(f"{r['run']:<4}  " + "  ".join(f"{c:>{len(n)}}" for c, n in zip(cells, names)) + f"  {r['seconds']}초"
               + ("  통과" if r["result"]["passed"] else ""))
     if summary["scored"]:

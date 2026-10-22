@@ -27,9 +27,11 @@ class ExplanationReasoner(DsrReasoner):
 
     def product_impacts(self, requirements, products, rules, *args):
         verdicts = {"P005": "no_change", "P009": "needs_review"}
+        # 보류(P009)는 적용 범위 조항을 근거로 든다 (프롬프트 13번). 적용 범위가 아닌 보류는 코드가 변경 필요로 돌린다
+        basis = {"P009": ["reg://credit-loan-ops/v4/3", "reg://credit-loan-ops/v4/15-2"]}
         return [ProductAssessment(requirement_id="REQ-15-2", product_id=p["productId"],
                                   impact=verdicts.get(p["productId"], "change_required"), target_rule_ids=[],
-                                  basis_refs=["reg://credit-loan-ops/v4/15-2"], applicability="all",
+                                  basis_refs=basis.get(p["productId"], ["reg://credit-loan-ops/v4/15-2"]), applicability="all",
                                   scope="시행일 이후 체결하는 계약", reason="고령자 설명 확인 의무 신설") for p in products]
 
 
@@ -66,12 +68,56 @@ def test_added_obligation_becomes_a_new_rule_proposal():
         (f"P001:{KEY}", None, "change_required", None, "true", "bool")
 
 
-def test_sale_ended_product_gets_no_new_rule():
-    """판매가 끝난 상품(P012)은 기존 규칙 변경과 같은 기준으로, 모델이 변경 필요라고 해도 새 규칙 대신 확인 필요."""
+def test_sale_ended_product_is_kept_with_the_sale_ended_article_as_basis():
+    """판매가 끝난 상품(P012)은 새 계약이 없다. 모델이 변경 필요라고 해도 유지이고, 근거는 판매 중단 상품 관리 조항."""
     out = AgentRunner(build_graph(LocalTools(), ExplanationReasoner())).start("T1", "credit-loan-ops", article_ids=["15-2"])
     p012 = next(i for i in out["product_impacts"] if i.product_id == "P012")
-    assert p012.impact == "needs_review" and "판매가 끝난" in p012.reason
-    assert not [p for p in out["proposals"] if p.product_id == "P012" and p.changes]
+    assert p012.impact == "no_change" and p012.applicability == "excluded" and "판매가 끝난" in p012.reason
+    assert "reg://credit-loan-ops/v4/21" in p012.basis_refs
+    assert not [p for p in out["proposals"] if p.product_id == "P012"]
+
+
+class HedgingReasoner(ExplanationReasoner):
+    """청년 상품(P005)을 자료 부족이라며 확인 필요로 내는 모델. 코드가 나이 상한 규칙으로 유지를 확정해야 한다."""
+
+    def product_impacts(self, requirements, products, rules, *args):
+        out = super().product_impacts(requirements, products, rules, *args)
+        for item in out:
+            if item.product_id == "P005":
+                item.impact, item.applicability, item.reason = "needs_review", "unknown", "고령자 해당 여부를 확정할 수 없음"
+        return out
+
+
+class ProcedureHedgingReasoner(ExplanationReasoner):
+    """P006 은 절차 충족을 단정할 수 없다며, P009 는 적용 범위 조항을 들어 보류하는 모델."""
+
+    def product_impacts(self, requirements, products, rules, *args):
+        out = super().product_impacts(requirements, products, rules, *args)
+        for item in out:
+            if item.product_id == "P006":
+                item.impact, item.applicability, item.reason = "needs_review", "unknown", "현재 절차가 새 의무를 충족하는지 단정할 수 없음"
+                item.basis_refs = ["reg://credit-loan-ops/v4/15-2", "reg://credit-loan-ops/v4/15"]
+            if item.product_id == "P009":
+                item.basis_refs = ["reg://credit-loan-ops/v4/3", "reg://credit-loan-ops/v4/15-2"]
+        return out
+
+
+def test_review_on_a_new_obligation_counts_only_when_it_cites_the_scope_article():
+    out = AgentRunner(build_graph(LocalTools(), ProcedureHedgingReasoner())).start("T1", "credit-loan-ops", article_ids=["15-2"])
+    impacts = {i.product_id: i for i in out["product_impacts"]}
+    assert impacts["P006"].impact == "change_required" and "절차 유무" in impacts["P006"].reason
+    assert impacts["P009"].impact == "needs_review"      # 적용 범위 조항을 근거로 든 보류는 그대로
+    assert any(p.product_id == "P006" and p.changes for p in out["proposals"])
+
+
+def test_product_whose_max_age_is_below_the_senior_threshold_is_kept():
+    out = AgentRunner(build_graph(LocalTools(), HedgingReasoner())).start("T1", "credit-loan-ops", article_ids=["15-2"])
+    p005 = next(i for i in out["product_impacts"] if i.product_id == "P005")
+    assert p005.impact == "no_change" and p005.applicability == "excluded"
+    assert "R046" in p005.evidence_rule_ids and "reg://credit-loan-ops/v4/15" in p005.basis_refs
+    assert "만 60세" in p005.reason
+    # 상한이 없는 상품은 그대로 모델 판단 (변경 필요 → 새 규칙)
+    assert next(i for i in out["product_impacts"] if i.product_id == "P001").impact == "change_required"
 
 
 def test_new_rule_goes_through_backend_review_and_apply():

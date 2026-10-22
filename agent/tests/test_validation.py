@@ -266,8 +266,81 @@ def test_rule_above_old_limit_is_not_the_same_limit():
     assert verdict == "needs_review" and "R073" in note
 
 
-def test_sale_ended_product_goes_to_review():
-    assert change_problem(DSR_REQ, rule("R079", "DSR_LIMIT", "0.40"), {"status": "SALE_ENDED"})[0] == "needs_review"
+def test_sale_ended_product_is_kept():
+    verdict, note = change_problem(DSR_REQ, rule("R079", "DSR_LIMIT", "0.40"), {"status": "SALE_ENDED"})
+    assert verdict == "no_change" and "판매가 끝난" in note
+
+
+def test_senior_threshold_and_age_exclusion_come_from_rules_and_regulation_text():
+    from app.validation import excluded_by_age, senior_threshold, sale_ended_basis
+    context = [{"uri": "reg://credit-loan-ops/v4/15", "text": '이 기준에서 "고령자"란 신청일 현재 만 60세 이상인 자를 말한다.'},
+               {"uri": "reg://credit-loan-ops/v4/21", "text": "판매가 중단된 상품은 신규로 취급하지 아니하며, 기존 계약의 관리만 한다."}]
+    added = Requirement(id="REQ-15-2", article_id="15-2", article="제15조의2", article_ref="reg://credit-loan-ops/v4/15-2",
+                        change="added", summary="고령자 설명 확인 의무 신설", target="Senior explanation-required",
+                        new_text="은행은 고령자와 대출 계약을 체결하기 전에 설명하고 이해했는지 확인해야 한다.")
+    youth = [rule("R045", "ELIGIBLE_MIN_AGE", "19", "age"), rule("R046", "ELIGIBLE_MAX_AGE", "34", "age")]
+    senior = [rule("R010", "ELIGIBLE_MIN_AGE", "65", "age")]
+
+    assert senior_threshold(context) == (60, "reg://credit-loan-ops/v4/15")
+    age_rule, uri, note = excluded_by_age(added, youth, context)
+    assert age_rule["ruleId"] == "R046" and uri == "reg://credit-loan-ops/v4/15" and "만 60세" in note
+    assert excluded_by_age(added, senior, context) is None               # 상한이 없으면 고령자와 계약할 수 있다
+    assert excluded_by_age(DSR_REQ, youth, context) is None              # 새 조항이 아니면 보지 않는다
+    assert excluded_by_age(added, youth, context[1:]) is None            # 정의 조항이 없으면 확정하지 않는다
+    assert sale_ended_basis(context) == ["reg://credit-loan-ops/v4/21"]
+
+
+SENIOR_DEF_REQ = Requirement(id="REQ-15", article_id="15", article="제15조", article_ref="reg://credit-loan-ops/v4/15",
+                             change="modified", summary="고령자 기준 65세 → 60세", target="Senior age threshold",
+                             old_text='이 기준에서 "고령자"란 신청일 현재 만 65세 이상인 자를 말한다.',
+                             new_text='이 기준에서 "고령자"란 신청일 현재 만 60세 이상인 자를 말한다.')
+
+
+def test_changed_definition_only_touches_products_whose_rules_follow_it():
+    from app.validation import definition_without_rule
+    def based(row, *articles):
+        return {**row, "basisArticles": list(articles)}
+    follows = [based(rule("R010", "ELIGIBLE_MIN_AGE", "65", "age"), "credit-loan-ops/15")]
+    other = [based(rule("R005", "SENIOR_RATE_DISCOUNT", "0.003", "ratio"), "credit-loan-ops/16")]
+    unknown_age = other + [based(rule("R999", "SOME_AGE", "65", "age"))]
+    unknown_ratio = other + [based(rule("R066", "BUSINESS_DSCR_MIN", "1.25", "ratio"))]
+
+    assert definition_without_rule(SENIOR_DEF_REQ, follows) is None               # 정의를 따르는 규칙이 있다 → 모델 판단
+    assert "credit-loan-ops/15" in definition_without_rule(SENIOR_DEF_REQ, other)  # 없으면 유지
+    assert definition_without_rule(SENIOR_DEF_REQ, unknown_age) is None           # 근거 없는 나이 규칙은 따를 수도 있다
+    assert definition_without_rule(SENIOR_DEF_REQ, unknown_ratio)                 # 비율 규칙은 나이 정의와 무관
+    assert definition_without_rule(DSR_REQ, other) is None                         # 한도 변경은 정의가 아니다
+
+    from app.validation import definition_followers
+    assert [r["ruleId"] for r in definition_followers(SENIOR_DEF_REQ, follows)] == ["R010"]   # 65 를 그대로 옮겨 적은 규칙
+    seventy = [based(rule("R010", "ELIGIBLE_MIN_AGE", "70", "age"), "credit-loan-ops/15")]
+    assert definition_followers(SENIOR_DEF_REQ, seventy) == []                     # 정의와 다른 값이면 모델 판단
+    assert definition_followers(SENIOR_DEF_REQ, other) == []
+    assert definition_followers(DSR_REQ, follows) == []
+
+
+def test_products_without_a_rule_on_the_changed_definition_are_kept_in_the_graph():
+    class HedgesOnDefinition(DsrReasoner):
+        def requirements(self, diff):
+            return [SENIOR_DEF_REQ.model_copy(update={"article_ref": next(c for c in diff["changes"] if c["article_id"] == "15")["new_uri"]})]
+
+        def product_impacts(self, requirements, products, rules, *args):
+            out = []
+            # P002 는 "65세 자격이 60세 기준보다 엄격하니 변경 불필요"라며 보류하고, 나머지는 "계약할 수 있으니 반영 필요"라며 보류한다
+            for p in products:
+                out.append(ProductAssessment(requirement_id="REQ-15", product_id=p["productId"], impact="needs_review",
+                                             applicability="unknown", basis_refs=["reg://credit-loan-ops/v4/15"],
+                                             scope="확인", reason="확정할 수 없음"))
+            return out
+    out = AgentRunner(build_graph(LocalTools(), HedgesOnDefinition())).start("T1", "credit-loan-ops", article_ids=["15"])
+    impacts = {i.product_id: i for i in out["product_impacts"]}
+    # 제15조를 따르며 옛 값 65 를 가진 R010 은 정의와 함께 60 으로 바뀐다
+    assert impacts["P002"].impact == "change_required" and impacts["P002"].target_rule_ids == ["R010"]
+    assert "정의와 함께 바뀜" in impacts["P002"].reason
+    for pid in ("P001", "P005", "P007", "P011"):
+        assert impacts[pid].impact == "no_change" and impacts[pid].applicability == "excluded", pid
+        assert "reg://credit-loan-ops/v4/15" in impacts[pid].basis_refs and "정의를 따르는 규칙" in impacts[pid].reason
+    assert {c.rule_id for p in out["proposals"] for c in p.changes} == {"R010"}
 
 
 def test_non_limit_requirement_is_not_judged_by_numbers():
@@ -288,7 +361,10 @@ def test_wrong_targets_from_real_run_are_filtered_before_proposal():
     impacts = {i.product_id: i for i in out["product_impacts"]}
     assert impacts["P001"].impact == "change_required" and impacts["P001"].target_rule_ids == ["R001"]
     assert impacts["P004"].impact == "no_change" and "R037" in impacts["P004"].evidence_rule_ids
-    assert impacts["P010"].impact == "needs_review" and impacts["P012"].impact == "needs_review"
+    assert impacts["P010"].impact == "needs_review"
+    # 판매가 끝난 상품은 정답지대로 유지. 고른 규칙은 근거로 남고 판매 중단 조항이 붙는다
+    assert impacts["P012"].impact == "no_change" and "R079" in impacts["P012"].evidence_rule_ids
+    assert "reg://credit-loan-ops/v4/21" in impacts["P012"].basis_refs
     assert {c.rule_id for p in out["proposals"] for c in p.changes} == {"R001"}
 
 
@@ -387,5 +463,7 @@ def test_senior_age_traps_are_filtered_by_rule_basis():
     out = AgentRunner(build_graph(LocalTools(), SeniorMistakes())).start("T1", "credit-loan-ops", article_ids=["15"])
     impacts = {i.product_id: i for i in out["product_impacts"]}
     assert impacts["P002"].target_rule_ids == ["R010"] and impacts["P002"].impact == "change_required"
-    # 모델은 P001을 바꿔야 한다고 봤는데 고른 규칙이 무관하다 → 조용히 유지로 확정하지 않고 사람에게 넘긴다
-    assert impacts["P001"].impact == "needs_review" and impacts["P001"].target_rule_ids == []
+    # 모델은 P001을 바꿔야 한다고 봤는데 고른 규칙(R026)은 다른 조항을 따른다. P001에는 제15조를 따르는 규칙이 없으므로
+    # 정답지대로 유지. 고른 규칙은 근거로 남고 정의 조항이 붙는다
+    assert impacts["P001"].impact == "no_change" and impacts["P001"].target_rule_ids == []
+    assert "R026" in impacts["P001"].evidence_rule_ids and "reg://credit-loan-ops/v4/15" in impacts["P001"].basis_refs
