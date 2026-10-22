@@ -24,8 +24,8 @@ Vue ──(/api/**, JWT)──▶ Spring ──(/run · /resume · /continue)─
 | 프론트는 Spring만 호출하나? | 네. Agent · MCP는 직접 호출하지 않는다. |
 | 세션 쿠키 vs JWT | JWT (`Authorization: Bearer`). 시드 계정 `officer1` · `planner1` · `dev1` · `dev2`, 비밀번호 `password`. 역할은 없다. |
 | 폴링 vs SSE | 둘 다 된다. `GET /tasks/{id}` + `GET /tasks/{id}/events?after=` 폴링으로 충분. SSE는 `/stream?access_token=` (EventSource는 헤더를 못 보냄). |
-| 사람 확인은 몇 번? | 한 번. 제안마다 반영 / 제외를 고른다 (`excludedProposalKeys`). 수정 요청은 없다 (10.3). |
-| 근거 검사를 통과 못 한 제안도 승인되나? | 아니다. 서버가 409로 막는다. `canApprove`가 같은 판단을 미리 알려준다. |
+| 사람 확인은 몇 번? | 최종 결정은 한 번. 제안마다 반영 / 제외를 고른다 (`excludedProposalKeys`). 그 전에 상품 하나씩 수정 요청을 보낼 수 있다 (10.3, `POST /revisions`). AI는 그 제안의 글만 다시 쓴다. |
+| 근거 검사를 통과 못 한 제안도 승인되나? | 아니다. 반영으로 고른 제안이 하나라도 `FAILED`면 서버가 409로 막는다. 제외한 제안은 보지 않는다. `canApprove`는 승인할 수 있는 제안이 있는지 알려준다. |
 | 규정 파일 형식 | `.md` / `.markdown` / `.txt`, UTF-8, 파일당 1MB 이하. |
 | 반영 결과는 어디에 남나? | `product_rules`에 새 행(`R083`~), `deliveries`에 `RULE_VERSION` 기록 (10.4). |
 | 명세서 출력 형식 | `GET /tasks/{id}/report`의 `report.markdown`. 화면 렌더링 + 다운로드. |
@@ -63,6 +63,8 @@ GET  /api/auth/me
 | `getProposals(id)` | `GET /api/ai/tasks/{id}/proposals` | | 10.2 |
 | `getContractImpacts(id)` | `GET /api/ai/tasks/{id}/contract-impacts` | | 10.6 |
 | `reviewProposals(id, d)` | `POST /api/ai/tasks/{id}/review` | `{decision:"APPROVE"\|"REJECT", comment?, excludedProposalKeys?}` — 반려는 `comment` 필수 | `Approval` — 10.3 |
+| `requestRevision(id, r)` | `POST /api/ai/tasks/{id}/revisions` | `{proposalId, baseVersion, comment, revisionId?}` — 제안 하나의 글을 AI가 다시 쓰게 한다 | **202** `{revisionId, proposalId, baseVersion, status:"DESIGNING"}` — 10.3 |
+| `getRevision(id, rid)` | `GET /api/ai/tasks/{id}/revisions/{revisionId}` | | `{revisionId, proposalId, baseVersion, comment, requestedBy, createdAt, state, version, outcome, response, changedFields, proposals[]}` — 10.3 |
 | `getReport(id)` | `GET /api/ai/tasks/{id}/report` | | `{task, report, review, deliveries[]}` — `review`는 가장 최근 확인 기록 (결정 · 사유 · 확인한 사람), 확인 전이면 null ([예시](./contracts/report.get.json), [반려](./contracts/report.get.rejected.json)) |
 | `getEvaluation(id)` | `GET /api/ai/tasks/{id}/evaluation` | | `{task, evaluation}` |
 | (폴링) | `GET /api/ai/tasks/{id}/events?after={seq}` | | `{seq, type, payload, createdAt}[]` |
@@ -118,14 +120,14 @@ POST {AGENT_BASE_URL}/run
  "callbackBaseUrl":"http://backend:8080/internal/tasks/{taskId}"}
 
 POST {AGENT_BASE_URL}/resume
-{"taskId","threadId","step":"REVIEW","decision":"APPROVE"|"REJECT","approvalId","comment","payload","callbackBaseUrl"}
+{"taskId","threadId","step":"REVIEW","decision":"APPROVE"|"REJECT"|"REQUEST_CHANGES","approvalId","comment","payload","callbackBaseUrl"}
 
 POST {AGENT_BASE_URL}/continue      ← 사용자 "다시 시도" (POST /api/ai/tasks/{id}/retry)가 먼저 보냄. Agent 가 409(이어갈 게 없음)면 저장된 승인으로 /resume, 그것도 없으면 /run 을 다시 보냄.
                                       Agent 가 그 thread 를 아직 돌리고 있으면 423 으로 거절해야 한다 (백엔드는 사용자에게 "아직 실행 중" 409). 받은 순간부터 끝날 때까지가 "실행 중"이다 — 원문을 받는 구간도 포함
 {"taskId","threadId","callbackBaseUrl"}
 ```
 
-`/resume`의 payload는 확인 기록과 같다. `{approvedProposalKeys:[…], excludedProposalKeys:[…]}` (REJECT면 `approvedProposalKeys` 없음).
+`/resume`의 payload는 확인 기록과 같다. `{approvedProposalKeys:[…], excludedProposalKeys:[…]}` (REJECT면 `approvedProposalKeys` 없음). `REQUEST_CHANGES`면 `{proposalId, baseVersion}`이고 `approvalId`는 없다 (10.3).
 
 ### Agent → Spring (`{callbackBaseUrl}` 아래)
 
@@ -146,13 +148,13 @@ POST {AGENT_BASE_URL}/continue      ← 사용자 "다시 시도" (POST /api/ai/
 2. interrupt 직전에 제안을 저장하고 `APPROVAL_REQUIRED {step:"REVIEW"}`를 보낸다.
 3. 바꿀 상품이 없으면 `PUT /report` 후 `DONE {outcome:"NO_CHANGE"}`.
 4. 끝나면 `PUT /report` 후 `DONE {outcome}`. 오류는 `FAILED {reason}`.
-5. 10.1 그림에 없는 전이는 409. `WAITING_REVIEW`에서 나가는 전이는 확인 API만 한다 (Agent가 보낸 `FAILED`도 409, 10.4). 종료 상태는 같은 outcome의 `DONE`만 받는다.
+5. 10.1 그림에 없는 전이는 409. `WAITING_REVIEW`에서 나가는 전이는 확인 API · 수정 요청 API만 한다 (Agent가 보낸 `FAILED`도 409, 10.4). 수정 요청 때는 백엔드가 먼저 `DESIGNING`으로 옮긴 뒤 `/resume`을 보내므로, Agent가 보내는 `STEP proposal_agent`는 같은 상태로의 전이다. 종료 상태는 같은 outcome의 `DONE`만 받는다.
 6. 산출물 저장 가능 상태 (그 밖에는 409)
 
 | 경로 | 상태 |
 |---|---|
 | `PUT /requirements` | EXTRACTING |
-| `PUT /proposals` | DESIGNING · VERIFYING (확인 대기부터 고정) |
+| `PUT /proposals` | DESIGNING · VERIFYING (확인 대기부터 고정. 수정 요청으로 다시 `DESIGNING`이 되면 새 버전을 받는다) |
 | `PUT /contract-impacts` | LOCATING · DESIGNING · VERIFYING |
 
 ## 7. 쓰기 도구 (승인 필요)
@@ -218,7 +220,8 @@ rr.jobs (direct) ─ job ──▶ rr.jobs.q ──▶ JobWorker ─ 성공 ─�
 
 ```
 EXTRACTING ─▶ LOCATING ─▶ DESIGNING ⇄ VERIFYING ─▶ WAITING_REVIEW ─(APPROVE)─▶ PUBLISHING ─▶ DONE
-     │            │                                       └(REJECT)▶ REJECTED
+     │            │            ▲                          ├(REJECT)▶ REJECTED
+     │            │            └──(REQUEST_CHANGES, 제안 하나 다시 작성)──┘
      └▶ NO_CHANGE ┘ (전 상품 유지)                    어디서든 오류 ▶ FAILED
 ```
 
@@ -254,18 +257,23 @@ EXTRACTING ─▶ LOCATING ─▶ DESIGNING ⇄ VERIFYING ─▶ WAITING_REVIEW 
 | `reason` | 문자열 | 필수 (`keep` · `needs_check`는 왜 그런지) |
 | `transition` | 문자열 | 경과조치 |
 | `followUp` | 문자열 배열 | 후속 작업 (화면 문구 · 심사 절차 · 설명서) |
-| `round` | 1 이상 | 작성 회차 |
+| `version` | 1 이상 | 제안 버전. 수정 요청으로 다시 쓸 때마다 +1 (Agent `ProductProposal.version`). 없으면 1 |
+| `round` | 1 이상 | 같은 버전 안의 작성 회차 (근거 검사 실패 재시도, 최대 2) |
 | `verifyStatus` · `verifyLog` | `PENDING` \| `PASSED` \| `FAILED` | 근거 검사 결과 |
+| `revisionOutcome` | `none` \| `revised` \| `cannot_apply` \| `needs_clarification` \| `failed` | 수정 요청 결과 (10.3). 없으면 `none` |
+| `revisionResponse` | 문자열 \| null | AI의 반영 · 미반영 설명 |
+| `changedFields` | 문자열 배열 | 이전 버전과 달라진 칸 (`recommendation` · `actions` · `optional_actions` · `precautions`). 없으면 `[]` |
 
 **Agent → Spring** `PUT {callbackBaseUrl}/proposals` `{items:[…]}` ([예시](./contracts/proposals.put.json))
-- `(proposalKey, round)` 기준 upsert. 근거 검사 결과만 보낼 때도 같은 항목을 보낸다.
-- `DESIGNING` · `VERIFYING`에서만 받는다. `WAITING_REVIEW`부터 고정 (사용자가 본 제안과 반영할 제안이 같아야 한다).
+- `(proposalKey, version, round)` 기준 upsert. 근거 검사 결과만 보낼 때도 같은 항목을 보낸다.
+- `DESIGNING` · `VERIFYING`에서만 받는다. `WAITING_REVIEW`부터 고정 (사용자가 본 제안과 반영할 제안이 같아야 한다). 수정 요청이 들어오면 다시 `DESIGNING`이 되고, 그 제안 묶음의 행이 새 `version`으로 들어온다. 다른 묶음의 행은 다시 와도 같은 내용이다.
 
 **화면** `GET /api/ai/tasks/{id}/proposals`
 - `{task, maxVerifyRounds, latestRound, canApprove, proposals[]}`
-- `proposals`는 회차 전체이고 현재 것은 `latest:true`. 서버가 `productName`(products 조인), `decision`(`APPLY` · `EXCLUDE` · null), 반영 결과 `apply {jobId, status, closedRuleId, newRuleId}`를 붙인다.
-- 현재 제안 = 제안 묶음(`reqKey` × `productId`)마다 가장 높은 `round`의 행. 재작성 회차에서 빠진 규칙 행은 이전 회차에 남지만 현재 제안이 아니다 (키마다 최고 회차를 고르면 1회차에만 있던 `FAILED` 행이 `canApprove`를 영원히 막는다).
-- `canApprove`: `WAITING_REVIEW` + 현재 `change_required` 제안이 1건 이상 + 모두 `PASSED`.
+- `proposals`는 버전 · 회차 전체이고 현재 것은 `latest:true`. 서버가 `productName`(products 조인), `decision`(`APPLY` · `EXCLUDE` · null), 반영 결과 `apply {jobId, status, closedRuleId, newRuleId}`를 붙인다. 이전 버전 행은 화면이 변경 전후 비교에 쓴다.
+- 현재 제안 = 제안 묶음(`reqKey` × `productId`)마다 가장 높은 `version`, 그 안에서 가장 높은 `round`의 행. 다시 쓴 버전 · 회차에서 빠진 규칙 행은 이전 것에 남지만 현재 제안이 아니다 (키마다 최고를 고르면 1회차에만 있던 `FAILED` 행이 승인을 영원히 막는다).
+- `latestRound`는 현재 버전 안의 최고 회차다.
+- `canApprove`: `WAITING_REVIEW` + 현재 `change_required` 제안 중 `PASSED`가 1건 이상. 승인 요청은 반영으로 고른 제안만 검사한다 (10.3).
 
 ### 10.3 사용자 확인
 
@@ -277,12 +285,43 @@ EXTRACTING ─▶ LOCATING ─▶ DESIGNING ⇄ VERIFYING ─▶ WAITING_REVIEW 
 
 | 결정 | 검사 | 결과 |
 |---|---|---|
-| `APPROVE` | `canApprove`(아니면 409). 제외 키는 현재 `change_required` 제안이어야 함(400). 제외하고 남는 게 없으면 400 (REJECT로 보낸다) | `PUBLISHING`. 기록 payload `{approvedProposalKeys, excludedProposalKeys}` |
+| `APPROVE` | `WAITING_REVIEW`(아니면 409). 제외 키는 현재 `change_required` 제안이어야 함(400). 제외하고 남는 게 없으면 400 (REJECT로 보낸다). 남은 제안 중 `FAILED`가 있으면 409 (응답에 막힌 키) | `PUBLISHING`. 기록 payload `{approvedProposalKeys, excludedProposalKeys}` |
 | `REJECT` | `comment`(반려 사유) 필수, 비면 400 | `REJECTED` |
 
-- 수정 요청(`REQUEST_CHANGES`)은 없다.
+**수정 요청** `POST /api/ai/tasks/{id}/revisions` ([예시](./contracts/revisions.post.json))
+
+```json
+{"proposalId": "REQ-8:P001", "baseVersion": 1,
+ "comment": "기존 대출을 연장하는 고객은 종전 기준이라는 안내를 조치에 넣어줘"}
+```
+
+최종 결정 전에 제안 하나를 AI가 다시 쓰게 한다. `proposalId`는 Agent 제안 ID(`{reqKey}:{productId}`)이고, 그 제안에 딸린 규칙 행 전부가 새 버전으로 바뀐다. AI는 글(제안 문장 · 조치 · 주의사항)만 다시 쓴다. 판정 · 바꿀 규칙 · 값 · 적용 범위는 Agent 검사가 고정한다.
+
+| 검사 | 응답 |
+|---|---|
+| `WAITING_REVIEW`가 아님 | 409 |
+| `proposalId`가 현재 제안 묶음에 없음, `comment` 비어 있음 | 400 |
+| `baseVersion`이 현재 버전과 다름 | 409 (응답에 현재 버전) |
+| `revisionId`를 보냈고 같은 값이 이미 있음 | 같은 내용이면 처음 접수를 그대로 돌려준다, 다르면 409 |
+
+- 응답 **202** `{revisionId, proposalId, baseVersion, status:"DESIGNING"}`. 접수이지 완료가 아니다. `revisionId`는 서버가 만든다 (확인 기록 id). 화면이 보낸 값은 저장만 한다.
+- 기록은 확인 기록(`approvals`)에 `decision: REQUEST_CHANGES`, payload `{proposalId, baseVersion, revisionId?}`로 남는다. `RESUMED {decision:"REQUEST_CHANGES"}` 이벤트 뒤 백엔드가 `STEP proposal_agent`를 남겨 `DESIGNING`으로 옮기고 Agent에 `/resume`을 보낸다.
+- 이후는 보통 흐름과 같다. `PUT /proposals`(새 `version`, `round` 1 · 2) → `STEP verify` → `APPROVAL_REQUIRED` → `WAITING_REVIEW`. 몇 번이든 반복할 수 있다.
+- 결과는 현재 제안 행의 `revisionOutcome` · `revisionResponse` · `changedFields`에 있다.
+
+| `revisionOutcome` | 뜻 | 승인 |
+|---|---|---|
+| `revised` | 요청을 본문에 반영 (`changedFields`에 바뀐 칸) | 가능 |
+| `cannot_apply` | 원문과 충돌해 반영 못 함 (예: 35% 대신 30%). 본문은 이전 그대로 | 가능 (이전 본문) |
+| `needs_clarification` | 모호하거나 대상 재판단 요청. 본문은 이전 그대로, `revisionResponse`에 확인할 질문 | 가능 (이전 본문), 또는 제외 |
+| `failed` | 두 번 써도 검사 실패. 본문은 이전으로 되돌림, `verifyStatus: FAILED` | 그 제안은 불가, 제외만 |
+
+- `GET /api/ai/tasks/{id}/revisions/{revisionId}`: 접수 내용과 결과. `state`는 `processing`(작업이 `DESIGNING` · `VERIFYING`) · `done`(새 버전 행이 있음) · `rejected`(Agent가 받지 않음, 아래). `proposals`는 그 제안 묶음의 이전 · 새 버전 행.
+- 처리 중에는 확인 API가 409다 (`WAITING_REVIEW`가 아니므로). 수정 요청 뒤의 승인은 새 버전 기준이다. 수정 요청 전에 만든 승인 기록은 뒤에 온 결정 때문에 반영에 쓸 수 없다 (10.4 `ApprovalGuard`).
+- Agent 재개: `POST /resume {step:"REVIEW", decision:"REQUEST_CHANGES", comment, payload:{proposalId, baseVersion}}`. Agent는 그래프를 돌리기 전에 거부할 수 있다: 검토 대기 thread가 아니면 409, `proposalId`가 없거나 버전이 다르거나 `comment`가 모호("다시 써줘" · "수정해줘")하면 400. 400이면 백엔드는 확인 대기로 되돌리고 사유를 `errorMessage`에 남긴다 (아래 Agent 400 규칙과 같다). 409 · 연결 실패는 FAILED이고 "다시 시도"가 수정 요청을 다시 보낸다.
 - **반려는 작업을 끝낸다.** "다시 시도" 대상이 아니다. 같은 규정 · 같은 데이터로 다시 올리면 같은 판정이 나온다 (의도한 재현성). 결과를 바꾸는 길은 셋이다.
   - 일부만 빼려면 반려 대신 `APPROVE` + `excludedProposalKeys`
+  - 제안 글이 아쉬우면 반려 대신 수정 요청 (`POST /revisions`)
   - 데이터 · 상품 문서가 틀렸으면 고친 뒤 새로 올린다
   - 판정이 틀렸으면 Agent를 고친다 (M3)
 - 반려 사유는 리포트 응답의 `review.comment`에 나온다. 모인 사유가 Agent 판정 오류 목록이 된다.
@@ -356,7 +395,7 @@ Agent `apply` 노드: 승인된 제안마다 한 번씩 호출하고 `/internal/
 | Agent 콜백 | `PUT /change-specs`, `POST /test-cases`, `PUT /patches` |
 | 내부 API | `POST /internal/work-tickets`, `POST /internal/jobs` |
 | 큐 작업 | `CHECK_PATCH` · `CREATE_DRAFT_PR` · `CREATE_TICKET` (남은 건 `APPLY_RULE_VERSION`) |
-| 상태 · 결정 | `WAITING_REQUIREMENT_APPROVAL` · `HELD`, 확인 단계 `REQUIREMENTS`, 결정 `CONFIRMED` · `HELD` · `REQUEST_CHANGES`, `excludedSpecKeys` |
+| 상태 · 결정 | `WAITING_REQUIREMENT_APPROVAL` · `HELD`, 확인 단계 `REQUIREMENTS`, 결정 `CONFIRMED` · `HELD` · `REQUEST_CHANGES`(요건 확정 단계의 것), `excludedSpecKeys`. `REQUEST_CHANGES`는 V8에서 제안 수정 요청(10.3)으로 다시 쓴다. 뜻이 다르다 |
 | 역할 | `OFFICER` · `DEVELOPER` (`users.role`, JWT `role`, 로그인 · `me` · 승인자 응답의 `role`, `pendingAction.role`) |
 | 응답 필드 | `counts.targets` · `nonTargets` · `patches` · `testCases`, 요건 `status`, 리셋 응답 `workTickets` |
 | 테이블 | `change_specs` · `code_patches` · `test_cases` · `db_migrations` · `work_tickets` |
