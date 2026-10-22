@@ -276,7 +276,11 @@ public class TaskService {
         return new RevisionReceipt(saved, proposalId, baseVersion, TaskStatus.DESIGNING.name(), false);
     }
 
-    /** 수정 요청 하나의 접수 내용과 결과. 결과는 그 제안 묶음에 baseVersion 보다 높은 버전이 생겼는지로 안다. */
+    /**
+     * 수정 요청 하나의 접수 내용과 결과. 결과는 이 요청이 만든 버전(baseVersion + 1)의 행이다. 뒤에 다른 요청이
+     * 더 높은 버전을 만들어도 이 요청의 결과는 바뀌지 않는다. 다시 쓰는 동안(DESIGNING · VERIFYING)은 새 버전 행이
+     * 이미 저장됐어도 processing 이다. 검사가 끝나야 결과다.
+     */
     @Transactional(readOnly = true)
     public TaskDtos.RevisionView revision(UUID taskId, Long revisionId) {
         AnalysisTask task = get(taskId);
@@ -287,13 +291,16 @@ public class TaskService {
         int baseVersion = ((Number) a.getPayload().get("baseVersion")).intValue();
         List<RuleProposal> bundle = proposals.findByTaskIdOrderByProposalKeyAscVersionAscRoundAsc(taskId).stream()
                 .filter(p -> Proposals.proposalId(p).equals(proposalId)).toList();
-        Optional<RuleProposal> result = Proposals.latest(bundle).stream().filter(p -> p.getVersion() > baseVersion).findFirst();
+        int producedVersion = baseVersion + 1;
+        Optional<RuleProposal> result = Proposals.latest(bundle.stream().filter(p -> p.getVersion() == producedVersion).toList())
+                .stream().findFirst();
         boolean latestRequest = latestReview(taskId).map(x -> x.getId().equals(a.getId())).orElse(false);
+        boolean rewriting = task.getStatus() == TaskStatus.DESIGNING || task.getStatus() == TaskStatus.VERIFYING;
 
         String state;
-        if (result.isPresent()) state = "done";
-        else if (task.getStatus() == TaskStatus.FAILED) state = "failed";
-        else if (latestRequest && (task.getStatus() == TaskStatus.DESIGNING || task.getStatus() == TaskStatus.VERIFYING)) state = "processing";
+        if (latestRequest && rewriting) state = "processing";
+        else if (latestRequest && task.getStatus() == TaskStatus.FAILED) state = "failed";
+        else if (result.isPresent()) state = "done";
         else state = "rejected";
 
         Map<String, String> names = productNames();

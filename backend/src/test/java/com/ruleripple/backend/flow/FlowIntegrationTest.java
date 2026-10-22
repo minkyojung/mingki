@@ -211,11 +211,12 @@ class FlowIntegrationTest {
         mvc.perform(user(post("/api/ai/tasks/" + id + "/revisions")).contentType(MediaType.APPLICATION_JSON)
                 .content(contract("revisions.post.json"))).andExpect(status().isConflict());
 
-        // Agent: P001 만 2버전 1회차로 다시 쓰고, 검사 뒤 확인 대기
+        // Agent: P001 만 2버전 1회차로 다시 쓰고, 검사 뒤 확인 대기. 새 버전 행이 저장돼도 검사가 끝나기 전엔 processing
         agentEvent(id, "STEP", Map.of("node", "proposal_agent"));
         internal(put("/internal/tasks/" + id + "/proposals"), rewritten("P001:DSR_LIMIT", 2, "revised",
                 "필수 조치에 기존 계약 연장 안내를 넣었습니다", List.of("actions"))).andExpect(status().isOk());
         agentEvent(id, "STEP", Map.of("node", "verify", "round", 1));
+        assertThat(getJson("/api/ai/tasks/" + id + "/revisions/" + revisionId).get("state").asText()).isEqualTo("processing");
         agentEvent(id, "APPROVAL_REQUIRED", Map.of("step", "REVIEW"));
         assertThat(taskStatus(id)).isEqualTo("WAITING_REVIEW");
 
@@ -238,14 +239,30 @@ class FlowIntegrationTest {
         assertThat(revision.get("outcome").asText()).isEqualTo("revised");
         assertThat(revision.get("proposals")).hasSize(2);   // 1버전 2회차 + 2버전 1회차
 
-        // 새 버전을 보고 승인 → 반영 중. 확인 기록은 수정 요청 · 승인 두 줄
+        // 두 번째 수정 요청이 3버전을 만들어도 첫 요청의 결과는 2버전 그대로
+        JsonNode second = read(mvc.perform(user(post("/api/ai/tasks/" + id + "/revisions")).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"proposalId\":\"REQ-8:P001\",\"baseVersion\":2,\"comment\":\"주의사항에 상담 안내 추가\"}")).andExpect(status().isAccepted()));
+        agentEvent(id, "STEP", Map.of("node", "proposal_agent"));
+        internal(put("/internal/tasks/" + id + "/proposals"), rewritten("P001:DSR_LIMIT", 3, "revised",
+                "주의사항에 상담 안내를 넣었습니다", List.of("precautions"))).andExpect(status().isOk());
+        agentEvent(id, "STEP", Map.of("node", "verify", "round", 1));
+        agentEvent(id, "APPROVAL_REQUIRED", Map.of("step", "REVIEW"));
+        JsonNode first = getJson("/api/ai/tasks/" + id + "/revisions/" + revisionId);
+        assertThat(first.get("state").asText()).isEqualTo("done");
+        assertThat(first.get("version").asInt()).isEqualTo(2);
+        assertThat(first.get("changedFields").get(0).asText()).isEqualTo("actions");
+        JsonNode latest = getJson("/api/ai/tasks/" + id + "/revisions/" + second.get("revisionId").asLong());
+        assertThat(latest.get("version").asInt()).isEqualTo(3);
+        assertThat(latest.get("proposals")).hasSize(3);
+
+        // 새 버전을 보고 승인 → 반영 중. 확인 기록은 수정 요청 둘 · 승인 한 줄
         mvc.perform(user(post("/api/ai/tasks/" + id + "/review")).contentType(MediaType.APPLICATION_JSON)
                 .content(contract("review.post.json"))).andExpect(status().isOk());
         assertThat(taskStatus(id)).isEqualTo("PUBLISHING");
         JsonNode approvals = getJson("/api/ai/tasks/" + id).get("approvals");
-        assertThat(approvals).hasSize(2);
+        assertThat(approvals).hasSize(3);
         assertThat(approvals.get(0).get("decision").asText()).isEqualTo("REQUEST_CHANGES");
-        assertThat(approvals.get(1).get("decision").asText()).isEqualTo("APPROVE");
+        assertThat(approvals.get(2).get("decision").asText()).isEqualTo("APPROVE");
     }
 
     @Test
