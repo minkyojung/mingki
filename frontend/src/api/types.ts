@@ -51,6 +51,9 @@ export interface TaskEvent {
     summary?: string
     requirementId?: string
     lookups?: Lookup[]
+    /** RESUMED: 확인 결정 (APPROVE · REJECT · REQUEST_CHANGES) */
+    decision?: string
+    proposalId?: string
   }
 }
 
@@ -69,6 +72,9 @@ export interface Requirement {
 
 export type Impact = 'change_required' | 'keep' | 'needs_check'
 
+/** 수정 요청 결과 (docs/BACKEND_API.md 10.3). 수정 요청 전에는 none */
+export type RevisionOutcome = 'none' | 'revised' | 'cannot_apply' | 'needs_clarification' | 'failed'
+
 export interface Proposal {
   proposalKey: string
   reqKey: string
@@ -81,6 +87,15 @@ export interface Proposal {
   proposedValue: string | null
   effectiveDate: string | null
   reason: string
+  /** AI가 쓴 제안 문장 · 조치. 수정 요청은 이 글만 다시 쓴다 */
+  proposed?: string | null
+  followUp?: string[] | null
+  /** 제안 버전. 수정 요청으로 다시 쓸 때마다 +1, 없으면 1 */
+  version?: number
+  revisionOutcome?: RevisionOutcome
+  revisionResponse?: string | null
+  /** 이전 버전과 달라진 칸 (recommendation · actions · optional_actions · precautions) */
+  changedFields?: string[] | null
   verifyStatus: 'PENDING' | 'PASSED' | 'FAILED'
   latest: boolean
   decision: 'APPLY' | 'EXCLUDE' | null

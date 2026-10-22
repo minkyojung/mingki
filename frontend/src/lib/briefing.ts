@@ -1,6 +1,7 @@
 /** 백엔드 응답을 화면(시안 v2)에 보일 모양으로 바꾸는 순수 함수. 컴포넌트는 이 결과를 그리기만 한다. */
 
-import type { Proposal, Requirement, TaskEvent, TaskStatus } from '@/api/types'
+import type { Proposal, Requirement, RevisionOutcome, TaskEvent, TaskStatus } from '@/api/types'
+import { proposalIdOf } from './revision'
 
 const SUFFIX: Record<string, string> = {
   percent: '%',
@@ -52,6 +53,17 @@ export interface ChangeRow {
   /** '40% → 35%' 또는 '새 규칙 추가' */
   change: string
   reason: string
+  /** 수정 요청 단위 `{reqKey}:{productId}` · 버전 */
+  proposalId: string
+  version: number
+  /** AI가 쓴 제안 문장 · 조치 (수정 요청으로 다시 쓰는 글) */
+  proposed: string
+  actions: string[]
+  revisionOutcome: RevisionOutcome
+  revisionResponse: string | null
+  changedFields: string[]
+  /** 근거 검사 실패: 반영할 수 없고 제외만 된다 */
+  failed: boolean
 }
 
 export interface ChangeGroup {
@@ -133,6 +145,14 @@ export function buildBriefing(requirements: Requirement[], proposals: Proposal[]
           productName: p.productName,
           change: added ? '새 규칙 추가' : valueChange(p),
           reason: p.reason,
+          proposalId: proposalIdOf(p),
+          version: p.version ?? 1,
+          proposed: p.proposed ?? '',
+          actions: p.followUp ?? [],
+          revisionOutcome: p.revisionOutcome ?? 'none',
+          revisionResponse: p.revisionResponse ?? null,
+          changedFields: p.changedFields ?? [],
+          failed: p.verifyStatus === 'FAILED',
         })),
       },
     ]

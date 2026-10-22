@@ -78,6 +78,17 @@ export function getProposals(id: string) {
   return request<ProposalsResponse>(`/ai/tasks/${id}/proposals`)
 }
 
+/** 수정 요청: 제안 하나(요건 × 상품)의 글을 AI가 다시 쓴다. 접수(202)이지 완료가 아니다 */
+export function requestRevision(
+  id: string,
+  body: { proposalId: string; baseVersion: number; comment: string },
+) {
+  return request<{ revisionId: number; proposalId: string; baseVersion: number; status: string }>(
+    `/ai/tasks/${id}/revisions`,
+    { json: body },
+  )
+}
+
 /** 확인: 체크를 푼 제안만 제외하고 나머지를 반영한다 */
 export function approve(id: string, excludedProposalKeys: string[]) {
   return request<unknown>(`/ai/tasks/${id}/review`, {
