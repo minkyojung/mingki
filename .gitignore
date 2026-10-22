@@ -1,2 +1,9 @@
 .env
 eval/results/
+
+# Local development tools and OS metadata
+.DS_Store
+.ruff_cache/
+.claude/
+CLAUDE.md
+.octave/
