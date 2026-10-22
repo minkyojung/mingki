@@ -117,6 +117,10 @@ def proposal_rows(proposal):
         "reason": proposal.reason,
         "transition": proposal.transitional,
         "followUp": [*proposal.actions, *proposal.optional_actions],
+        "version": proposal.version,
+        "revisionOutcome": proposal.revision_outcome,
+        "revisionResponse": proposal.revision_response or None,
+        "changedFields": list(proposal.changed_fields),
         "round": proposal.attempt,
         "verifyStatus": VERIFY[proposal.verification],
         "verifyLog": proposal.generation_error,
@@ -141,6 +145,7 @@ def keep_row(impact, round_):
             "ruleKey": None, "impact": "keep", "current": impact.current, "proposed": None, "unit": None,
             "currentValue": None, "proposedValue": None, "effectiveDate": None, "basis": basis_text(impact.basis_refs),
             "reason": impact.reason, "transition": None, "followUp": [], "round": round_,
+            "version": 1, "revisionOutcome": "none", "revisionResponse": None, "changedFields": [],
             "verifyStatus": "PASSED", "verifyLog": None}
 
 

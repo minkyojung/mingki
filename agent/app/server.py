@@ -131,7 +131,7 @@ def create_app(
     def resume(body: dict, x_internal_token: str | None = Header(default=None)):
         authorize(x_internal_token)
         req = parse(ResumeRequest, body)
-        # 백엔드 확인(APPROVE + 승인 · 제외 목록)을 제안별 결정과 apply 승인으로 바꾼다.
+        # 승인 · 제외 또는 REQUEST_CHANGES 를 내부 명령으로 바꾼다. 재작성은 apply 승인 없이 다시 검토한다.
         # 검토 대기 중이 아니면 409, 키가 현재 제안과 다르면 400. 그래프를 돌리기 전에 거부한다.
         try:
             decision = runner.backend_decision(req)

@@ -4,13 +4,14 @@
 제안 펼치기(상품 × 요건 → 상품 × 규칙 행)는 app.backend 에 있다.
 
 사람 확인은 1번이다 (SIMPLIFICATION v2). 백엔드의 APPROVE + 승인 · 제외 목록을 Agent 의 제안별 approve · reject 와
-apply 노드가 쓸 승인(apply_approval)으로 바꾸고 finish 로 검토를 끝낸다. 수정 요청 · 직접 편집은 백엔드 경로에서 쓰지 않는다.
+apply 노드가 쓸 승인(apply_approval)으로 바꾸고 finish 로 검토를 끝낸다.
+REQUEST_CHANGES 는 선택 제안만 재작성하고 다시 검토를 기다린다. 직접 편집은 CLI 전용이다.
 """
 
 import logging
 
 from app.backend import proposal_items, proposal_keys, requirements_payload
-from app.validation import approval_problem
+from app.validation import approval_problem, validate_feedback
 
 log = logging.getLogger(__name__)
 
@@ -27,8 +28,22 @@ def review_decision(proposals, decision, payload, comment=None, approval_id=None
     반영으로 고른 행이 하나라도 있는 제안은 approve, 나머지는 reject. APPROVE 면 apply 노드가 쓸 승인
     (approvalId + 반영 키)을 함께 넘긴다. 승인 · 제외 키는 Agent 가 보낸 현재 변경 제안 행과 정확히 맞아야 한다.
     """
+    if decision == "REQUEST_CHANGES":
+        proposal = next((p for p in proposals if p.id == payload.get("proposalId")), None)
+        if proposal is None or proposal.status != "pending":
+            raise ValueError("현재 검토할 제안 ID가 아닙니다. 상품 × 요건의 proposalId를 보내세요")
+        version = payload.get("baseVersion")
+        if type(version) is not int or version < 1:
+            raise ValueError("baseVersion은 1 이상의 정수여야 합니다")
+        if version != proposal.version:
+            raise ValueError(f"오래된 제안 버전입니다: {proposal.id}의 현재 버전은 {proposal.version}")
+        # 모델 실행을 제출하기 전에 의견을 검사한다. 400 이면 Spring 이 확인 대기로 복귀할 수 있다.
+        validate_feedback(comment or "")
+        return {"decisions": [{"proposal_id": proposal.id, "version": version,
+                               "action": "request_changes", "comment": comment}],
+                "finish": False, "apply_approval": None}
     if decision not in ("APPROVE", "REJECT"):
-        raise ValueError("decision 은 APPROVE | REJECT 입니다")
+        raise ValueError("decision 은 APPROVE | REJECT | REQUEST_CHANGES 입니다")
     pending = [p for p in proposals if p.status == "pending"]
     change_keys = [k for p in pending if p.impact == "change_required" and p.changes for k in proposal_keys(p)]
     approved = list(payload.get("approvedProposalKeys") or []) if decision == "APPROVE" else []
@@ -61,6 +76,14 @@ class SpringBridge:
         self.spring = spring
         self.round = 0
         self.keep_impacts = []
+        self.proposals = {}
+
+    def restore(self, state):
+        """요청마다 생긴 Bridge 에 체크포인트의 조회 결과를 복원한다. 재작성은 impact 노드를 다시 돌지 않는다."""
+        self.keep_impacts = [i for i in state.get("product_impacts", []) if i.impact == "no_change"]
+        self.proposals = {p.id: p for p in state.get("proposals", [])}
+        self.round = max((p.attempt for p in self.proposals.values()
+                          if p.status == "pending" and p.verification == "pending"), default=1)
 
     # ---------- 노드 ----------
 
@@ -68,8 +91,6 @@ class SpringBridge:
         if node == "review":
             return
         payload = {"node": node}
-        if node == "proposal_agent":
-            self.round += 1
         if node == "verify":
             payload["round"] = self.round
         self.spring.event("STEP", payload)
@@ -80,7 +101,16 @@ class SpringBridge:
         elif node == "product_impact_agent":
             self.keep_impacts = [i for i in delta["product_impacts"] if i.impact == "no_change"]
         elif node in ("proposal_agent", "verify"):
-            self.spring.put("proposals", proposal_items(delta["proposals"], self.keep_impacts, self.round))
+            proposals = delta["proposals"]
+            if node == "proposal_agent":
+                generated = [p for p in proposals if p.id not in self.proposals or
+                             (p.version, p.attempt) != (self.proposals[p.id].version, self.proposals[p.id].attempt)]
+                self.round = max((p.attempt for p in generated), default=self.round)
+            self.proposals = {p.id: p for p in proposals}
+            # 유지 판단에는 사용자 재작성이나 자동 보완이 없다. v1/round1 을 유지해 재개 때 회차가 흔들리지 않는다.
+            self.spring.put("proposals", proposal_items(proposals, self.keep_impacts, 1))
+        elif node == "review":
+            self.proposals = {p.id: p for p in delta["proposals"]}
         message = _message(delta)
         if message and node != "review":
             self.spring.event("STEP", {"node": node, "message": message})

@@ -145,7 +145,7 @@ def test_proposals_are_one_row_per_product_rule_including_keep():
 # docs/BACKEND_API.md 10.2 · docs/contracts/proposals.put.json 의 필드. 바뀌면 백엔드 ProposalsTest 와 같이 고친다.
 CONTRACT_FIELDS = {"proposalKey", "reqKey", "productId", "ruleId", "ruleKey", "impact", "current", "proposed", "unit",
                    "currentValue", "proposedValue", "effectiveDate", "basis", "reason", "transition", "followUp",
-                   "round", "verifyStatus", "verifyLog"}
+                   "round", "verifyStatus", "verifyLog", "version", "revisionOutcome", "revisionResponse", "changedFields"}
 
 
 def test_rows_match_contract_field_set():
@@ -153,7 +153,9 @@ def test_rows_match_contract_field_set():
     for row in spring.puts("proposals")[-1]["items"]:
         assert set(row) == CONTRACT_FIELDS, row["proposalKey"]
     if (CONTRACTS / "proposals.put.json").exists():
-        assert set(json.loads((CONTRACTS / "proposals.put.json").read_text())["items"][0]) == CONTRACT_FIELDS
+        # 백엔드 계약 PR 병합 전에는 기존 공유 예시에 합의한 네 칸을 합쳐 비교한다.
+        revision_fields = {"version", "revisionOutcome", "revisionResponse", "changedFields"}
+        assert set(json.loads((CONTRACTS / "proposals.put.json").read_text())["items"][0]) | revision_fields == CONTRACT_FIELDS
 
 
 class ExtraRuleOnce(DsrReasoner):
