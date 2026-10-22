@@ -66,9 +66,15 @@ function confirm() {
 </script>
 
 <template>
-  <section class="pt-12">
-    <p class="text-muted-foreground">{{ demoRegulation.title }} · {{ effective }} 시행</p>
-    <h1 class="mt-2 text-3xl font-bold">상품 {{ briefing.productCount }}개를 바꿔야 해요</h1>
+  <section class="pt-14">
+    <p
+      class="inline-flex items-center rounded-full bg-brand-soft px-3 py-1 text-sm font-medium text-accent-foreground"
+    >
+      {{ demoRegulation.title }} · {{ effective }} 시행
+    </p>
+    <h1 class="mt-4 text-[2rem] leading-tight font-bold">
+      상품 <span class="text-brand">{{ briefing.productCount }}개</span>를 바꿔야 해요
+    </h1>
     <AiLog :log="log" class="mt-4" />
 
     <div class="mt-8 space-y-4">
@@ -92,20 +98,20 @@ function confirm() {
     </div>
 
     <div
-      class="fixed inset-x-0 bottom-0 bg-linear-to-t from-muted via-muted to-transparent pt-8 pb-5"
+      class="fixed inset-x-0 bottom-0 bg-linear-to-t from-background via-background/95 to-transparent pt-10 pb-6"
     >
       <div class="mx-auto max-w-xl px-5">
         <AlertDialog>
           <AlertDialogTrigger as-child>
             <Button
               size="lg"
-              class="h-14 w-full rounded-xl text-base"
+              class="h-14 w-full rounded-2xl text-base shadow-lg shadow-brand/20"
               :disabled="!canApprove || !productIds.size || busy"
             >
               바꾸기
             </Button>
           </AlertDialogTrigger>
-          <AlertDialogContent>
+          <AlertDialogContent class="rounded-2xl">
             <AlertDialogHeader>
               <AlertDialogTitle>상품 {{ productIds.size }}개를 바꿀까요?</AlertDialogTitle>
               <AlertDialogDescription>{{ effective }}부터 적용돼요</AlertDialogDescription>

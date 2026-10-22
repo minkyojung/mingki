@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
 
 @import 'tailwindcss';
 @import 'tw-animate-css';
@@ -11,7 +11,7 @@
 @custom-variant data-checked (&[data-state='checked']);
 
 @theme inline {
-  --font-sans: 'Noto Sans KR', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Pretendard Variable', Pretendard, ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -44,6 +44,8 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -51,25 +53,28 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --radius: 0.75rem;
+  /* 로고 블루 #1A68FB */
+  --brand: oklch(0.567 0.231 262);
+  --brand-soft: oklch(0.96 0.025 262);
+  --background: oklch(0.982 0.004 260);
+  --foreground: oklch(0.21 0.02 265);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.02 265);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.21 0.02 265);
+  --primary: var(--brand);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.96 0.006 260);
+  --secondary-foreground: oklch(0.21 0.02 265);
+  --muted: oklch(0.96 0.006 260);
+  --muted-foreground: oklch(0.55 0.02 262);
+  --accent: var(--brand-soft);
+  --accent-foreground: oklch(0.45 0.19 262);
+  --destructive: oklch(0.6 0.22 25);
+  --border: oklch(0.925 0.008 260);
+  --input: oklch(0.89 0.01 260);
+  --ring: oklch(0.567 0.231 262 / 60%);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -86,14 +91,16 @@
 }
 
 .dark {
+  --brand: oklch(0.65 0.2 262);
+  --brand-soft: oklch(0.3 0.06 262);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --primary: var(--brand);
+  --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -119,11 +126,26 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* 내용이 짧은 화면: 헤더 아래 공간에서 가운데보다 살짝 위(시각적 중심)에 둔다 */
+@utility stage {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(100svh - 4rem - 1px); /* 헤더 높이 + 아래 테두리 */
+  padding-top: 3rem;
+  padding-bottom: 12svh;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    letter-spacing: -0.01em;
+    word-break: keep-all; /* 한글은 단어 단위로 줄바꿈 */
+  }
+  h1 {
+    letter-spacing: -0.025em;
   }
 }
