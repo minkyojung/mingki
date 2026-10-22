@@ -150,6 +150,26 @@ def excluded_by_age(requirement, rules, context):
     return None
 
 
+_DEFINITION = re.compile(r"(?:란|이란|라\s*함은)\s*[^\n]*?(?:말한다|한다)")
+
+
+def definition_without_rule(requirement, rules):
+    """정의가 바뀐 요건(예: "고령자"란 … 말한다)인데 그 조항을 따르는 규칙(basisArticles)이 상품에 없으면 그 이유. 아니면 None.
+
+    정의는 그것을 값으로 쓰는 규칙이 있을 때만 상품 규칙에 영향을 준다. 근거 조항이 비어 있는 규칙이 그 정의의
+    단위(예: 나이)로 돼 있으면 그 규칙이 정의를 따를 수도 있으므로 확정하지 않는다.
+    """
+    if requirement.change != "modified" or not _DEFINITION.search(requirement.new_text or ""):
+        return None
+    article = article_key(requirement.article_ref)
+    if not article or any(article in (rule.get("basisArticles") or []) for rule in rules):
+        return None
+    unknown_units = {rule.get("unit") for rule in rules if not rule.get("basisArticles")}
+    if any(expected_value(requirement, unit) is not None for unit in unknown_units):
+        return None
+    return f"{article}의 정의를 따르는 규칙이 이 상품에 없음 (근거 조항 기준)"
+
+
 def sale_ended_basis(context):
     """판매 중단 상품의 관리를 정한 조항 uri (유지 판정의 근거). 없으면 빈 목록."""
     return [a["uri"] for a in context if _SALE_ENDED_ARTICLE.search(a.get("text") or "")][:1]

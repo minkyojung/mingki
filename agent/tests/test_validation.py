@@ -290,6 +290,54 @@ def test_senior_threshold_and_age_exclusion_come_from_rules_and_regulation_text(
     assert sale_ended_basis(context) == ["reg://credit-loan-ops/v4/21"]
 
 
+SENIOR_DEF_REQ = Requirement(id="REQ-15", article_id="15", article="제15조", article_ref="reg://credit-loan-ops/v4/15",
+                             change="modified", summary="고령자 기준 65세 → 60세", target="Senior age threshold",
+                             old_text='이 기준에서 "고령자"란 신청일 현재 만 65세 이상인 자를 말한다.',
+                             new_text='이 기준에서 "고령자"란 신청일 현재 만 60세 이상인 자를 말한다.')
+
+
+def test_changed_definition_only_touches_products_whose_rules_follow_it():
+    from app.validation import definition_without_rule
+    def based(row, *articles):
+        return {**row, "basisArticles": list(articles)}
+    follows = [based(rule("R010", "ELIGIBLE_MIN_AGE", "65", "age"), "credit-loan-ops/15")]
+    other = [based(rule("R005", "SENIOR_RATE_DISCOUNT", "0.003", "ratio"), "credit-loan-ops/16")]
+    unknown_age = other + [based(rule("R999", "SOME_AGE", "65", "age"))]
+    unknown_ratio = other + [based(rule("R066", "BUSINESS_DSCR_MIN", "1.25", "ratio"))]
+
+    assert definition_without_rule(SENIOR_DEF_REQ, follows) is None               # 정의를 따르는 규칙이 있다 → 모델 판단
+    assert "credit-loan-ops/15" in definition_without_rule(SENIOR_DEF_REQ, other)  # 없으면 유지
+    assert definition_without_rule(SENIOR_DEF_REQ, unknown_age) is None           # 근거 없는 나이 규칙은 따를 수도 있다
+    assert definition_without_rule(SENIOR_DEF_REQ, unknown_ratio)                 # 비율 규칙은 나이 정의와 무관
+    assert definition_without_rule(DSR_REQ, other) is None                         # 한도 변경은 정의가 아니다
+
+
+def test_products_without_a_rule_on_the_changed_definition_are_kept_in_the_graph():
+    class HedgesOnDefinition(DsrReasoner):
+        def requirements(self, diff):
+            return [SENIOR_DEF_REQ.model_copy(update={"article_ref": next(c for c in diff["changes"] if c["article_id"] == "15")["new_uri"]})]
+
+        def product_impacts(self, requirements, products, rules, *args):
+            out = []
+            for p in products:
+                if p["productId"] == "P002":
+                    out.append(ProductAssessment(requirement_id="REQ-15", product_id="P002", impact="change_required",
+                                                 target_rule_ids=["R010"], evidence_rule_ids=["R010"], applicability="all",
+                                                 basis_refs=["reg://credit-loan-ops/v4/15"], scope="시행일 이후 신청", reason="가입 나이 65 → 60"))
+                else:
+                    out.append(ProductAssessment(requirement_id="REQ-15", product_id=p["productId"], impact="needs_review",
+                                                 applicability="unknown", basis_refs=["reg://credit-loan-ops/v4/15"],
+                                                 scope="확인", reason="나이 상한이 없어 고령자와 계약할 수 있으니 반영 필요"))
+            return out
+    out = AgentRunner(build_graph(LocalTools(), HedgesOnDefinition())).start("T1", "credit-loan-ops", article_ids=["15"])
+    impacts = {i.product_id: i for i in out["product_impacts"]}
+    assert impacts["P002"].impact == "change_required" and impacts["P002"].target_rule_ids == ["R010"]
+    for pid in ("P001", "P005", "P007", "P011"):
+        assert impacts[pid].impact == "no_change" and impacts[pid].applicability == "excluded", pid
+        assert "reg://credit-loan-ops/v4/15" in impacts[pid].basis_refs and "정의를 따르는 규칙" in impacts[pid].reason
+    assert {c.rule_id for p in out["proposals"] for c in p.changes} == {"R010"}
+
+
 def test_non_limit_requirement_is_not_judged_by_numbers():
     age = DSR_REQ.model_copy(update={"old_text": "고령자란 신청일 현재 만 65세 이상인 자를 말한다.",
                                      "new_text": "고령자란 신청일 현재 만 60세 이상인 자를 말한다."})
@@ -410,5 +458,7 @@ def test_senior_age_traps_are_filtered_by_rule_basis():
     out = AgentRunner(build_graph(LocalTools(), SeniorMistakes())).start("T1", "credit-loan-ops", article_ids=["15"])
     impacts = {i.product_id: i for i in out["product_impacts"]}
     assert impacts["P002"].target_rule_ids == ["R010"] and impacts["P002"].impact == "change_required"
-    # 모델은 P001을 바꿔야 한다고 봤는데 고른 규칙이 무관하다 → 조용히 유지로 확정하지 않고 사람에게 넘긴다
-    assert impacts["P001"].impact == "needs_review" and impacts["P001"].target_rule_ids == []
+    # 모델은 P001을 바꿔야 한다고 봤는데 고른 규칙(R026)은 다른 조항을 따른다. P001에는 제15조를 따르는 규칙이 없으므로
+    # 정답지대로 유지. 고른 규칙은 근거로 남고 정의 조항이 붙는다
+    assert impacts["P001"].impact == "no_change" and impacts["P001"].target_rule_ids == []
+    assert "R026" in impacts["P001"].evidence_rule_ids and "reg://credit-loan-ops/v4/15" in impacts["P001"].basis_refs

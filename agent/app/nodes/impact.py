@@ -5,7 +5,7 @@ from app.schemas import Event, ProductImpact, ProductAssessment
 from app.data import active_rules, unended_rules
 from app.lookups import MAX_LOOKUPS, run_lookups
 from app.tools.base import recorder_of, recording
-from app.validation import (applied_new_rule, change_problem, changeable_rules, excluded_by_age,
+from app.validation import (applied_new_rule, change_problem, changeable_rules, definition_without_rule, excluded_by_age,
                             exemption_needs_customer_data, ground_conditions, condition_errors, sale_ended_basis)
 
 
@@ -103,13 +103,17 @@ def make_product_impact_agent(tools, reasoner):
                 conditions = row.conditions if len(rows) == 1 else []
 
                 # 자료로 확정되는 유지. 판매가 끝난 상품은 새 계약이 없고, 새 고령자 의무는 신청 나이 상한이
-                # 고령자 기준보다 낮은 상품과 무관하다. 모델이 뭐라고 했든 유지로 두고 근거 조항 · 규칙을 붙인다
+                # 고령자 기준보다 낮은 상품과 무관하며, 바뀐 정의는 그것을 따르는 규칙이 있는 상품에만 영향을 준다.
+                # 모델이 뭐라고 했든 유지로 두고 근거 조항 · 규칙을 붙인다
                 kept = None
+                product_rules = list(by_product[pid].values())
                 if product.get("status") == "SALE_ENDED":
                     kept = ("판매가 끝난 상품이라 새 계약이 없어 유지 (기간 연장은 계약 당시 기준)", sale_ended_basis(context), [])
-                elif (excluded := excluded_by_age(req, list(by_product[pid].values()), context)):
+                elif (excluded := excluded_by_age(req, product_rules, context)):
                     age_rule, definition_uri, note = excluded
                     kept = (note, [definition_uri], [age_rule["ruleId"]])
+                elif (note := definition_without_rule(req, product_rules)):
+                    kept = (note, [req.article_ref] if req.article_ref in articles else [], [])
                 if kept:
                     note, kept_basis, kept_evidence = kept
                     if impact != "no_change":
