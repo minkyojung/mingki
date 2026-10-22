@@ -145,7 +145,7 @@ def test_proposals_are_one_row_per_product_rule_including_keep():
 # docs/BACKEND_API.md 10.2 · docs/contracts/proposals.put.json 의 필드. 바뀌면 백엔드 ProposalsTest 와 같이 고친다.
 CONTRACT_FIELDS = {"proposalKey", "reqKey", "productId", "ruleId", "ruleKey", "impact", "current", "proposed", "unit",
                    "currentValue", "proposedValue", "effectiveDate", "basis", "reason", "transition", "followUp",
-                   "round", "verifyStatus", "verifyLog"}
+                   "round", "verifyStatus", "verifyLog", "version", "revisionOutcome", "revisionResponse", "changedFields"}
 
 
 def test_rows_match_contract_field_set():

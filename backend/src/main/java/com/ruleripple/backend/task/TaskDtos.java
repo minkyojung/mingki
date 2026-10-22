@@ -60,22 +60,36 @@ public final class TaskDtos {
     public record ProposalView(Long id, String proposalKey, String reqKey, String productId, String productName,
                                String ruleId, String ruleKey, String impact, String current, String proposed, String unit,
                                String currentValue, String proposedValue, LocalDate effectiveDate, String basis,
-                               String reason, String transition, List<String> followUp, int round,
-                               String verifyStatus, String verifyLog, boolean latest, String decision,
-                               ApplyResult apply) {
+                               String reason, String transition, List<String> followUp, int version, int round,
+                               String verifyStatus, String verifyLog, String revisionOutcome, String revisionResponse,
+                               List<String> changedFields, boolean latest, String decision, ApplyResult apply) {
         /** productName 은 products 에서 붙인다 (없는 상품이면 null). decision: APPLY · EXCLUDE · null. apply 는 반영 작업이 생기면 채운다. */
         public static ProposalView of(RuleProposal p, String productName, boolean latest, String decision, ApplyResult apply) {
             return new ProposalView(p.getId(), p.getProposalKey(), p.getReqKey(), p.getProductId(), productName, p.getRuleId(),
                     p.getRuleKey(), p.getImpact(), p.getCurrentText(), p.getProposedText(), p.getUnit(),
                     p.getCurrentValue(), p.getProposedValue(), p.getEffectiveDate(), p.getBasis(), p.getReason(),
-                    p.getTransition(), p.getFollowUp(), p.getRound(), p.getVerifyStatus().name(), p.getVerifyLog(),
-                    latest, decision, apply);
+                    p.getTransition(), p.getFollowUp(), p.getVersion(), p.getRound(), p.getVerifyStatus().name(), p.getVerifyLog(),
+                    p.getRevisionOutcome(), p.getRevisionResponse(), p.getChangedFields(), latest, decision, apply);
         }
     }
 
-    /** canApprove=false 면 화면에서도 반영 버튼을 막는다 (서버도 409 로 막음). */
+    /** canApprove=false 면 화면에서도 반영 버튼을 막는다 (서버도 409 로 막음). latestRound 는 현재 버전 안의 회차다. */
     public record ProposalsResponse(TaskSummary task, int maxVerifyRounds, int latestRound, boolean canApprove,
                                     List<ProposalView> proposals) {}
+
+    // ---------- 수정 요청 (docs/BACKEND_API.md 10.3) ----------
+
+    /** 접수 응답 (202). 접수이지 완료가 아니다. status 는 접수 직후의 작업 상태다. */
+    public record RevisionAccepted(Long revisionId, String proposalId, int baseVersion, String status) {}
+
+    /**
+     * 수정 요청 하나의 접수 내용과 결과. state: processing(다시 쓰는 중) · done(새 버전이 있음) · rejected(Agent 가 받지 않음) · failed.
+     * version · outcome · response · changedFields 는 새 버전의 첫 행에서 가져오고, 없으면 null.
+     * proposals 는 그 제안 묶음의 모든 버전 · 회차 행이라 화면이 변경 전후를 비교할 수 있다.
+     */
+    public record RevisionView(Long revisionId, String proposalId, int baseVersion, String comment, Approver requestedBy,
+                               OffsetDateTime createdAt, String state, Integer version, String outcome, String response,
+                               List<String> changedFields, List<ProposalView> proposals) {}
 
     public record ContractImpactsResponse(TaskSummary task, List<Map<String, Object>> items) {}
 

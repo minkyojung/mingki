@@ -12,7 +12,10 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
-/** 상품별 변경 제안 (v2). round 마다 새 행이라 근거 검사 회차 이력이 남는다. */
+/**
+ * 상품별 변경 제안 (v2). (version, round) 마다 새 행이라 사람이 다시 쓰게 한 버전과 근거 검사 회차 이력이 남는다.
+ * version 은 수정 요청(10.3)마다 1 씩 오르고, round 는 그 버전 안의 작성 회차(최대 2)다.
+ */
 @Entity
 @Table(name = "rule_proposals")
 @Getter
@@ -31,6 +34,9 @@ public class RuleProposal {
 
     @Column(name = "proposal_key", nullable = false, length = 100)
     private String proposalKey;
+
+    @Column(nullable = false)
+    private int version = 1;
 
     @Column(nullable = false)
     private int round;
@@ -88,6 +94,17 @@ public class RuleProposal {
 
     @Column(name = "verify_log", columnDefinition = "text")
     private String verifyLog;
+
+    /** none | revised | cannot_apply | needs_clarification | failed (Proposals.REVISION_OUTCOMES) */
+    @Column(name = "revision_outcome", nullable = false, length = 20)
+    private String revisionOutcome = Proposals.NO_REVISION;
+
+    @Column(name = "revision_response", columnDefinition = "text")
+    private String revisionResponse;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "changed_fields", nullable = false, columnDefinition = "jsonb")
+    private List<String> changedFields = List.of();
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

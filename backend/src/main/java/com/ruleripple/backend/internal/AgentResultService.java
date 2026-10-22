@@ -63,8 +63,9 @@ public class AgentResultService {
     }
 
     /**
-     * proposal_agent · verify (v2 10.2): (proposalKey, round) 기준 upsert.
-     * 확인 대기부터는 고정한다. 사용자가 본 제안과 반영할 제안이 같아야 한다.
+     * proposal_agent · verify (v2 10.2): (proposalKey, version, round) 기준 upsert.
+     * 확인 대기부터는 고정한다. 사용자가 본 제안과 반영할 제안이 같아야 한다. 수정 요청(10.3)이 들어오면
+     * 백엔드가 다시 DESIGNING 으로 옮기고, 그 제안 묶음의 행이 새 version 으로 온다.
      */
     @Transactional
     public int upsertProposals(UUID taskId, List<Proposals.Item> items) {
@@ -72,10 +73,11 @@ public class AgentResultService {
         for (Proposals.Item i : nonNull(items)) {
             String invalid = Proposals.invalid(i);
             if (invalid != null) throw bad(invalid);
-            RuleProposal p = proposals.findByTaskIdAndProposalKeyAndRound(taskId, i.proposalKey(), i.round())
+            RuleProposal p = proposals.findByTaskIdAndProposalKeyAndVersionAndRound(taskId, i.proposalKey(), i.versionOrDefault(), i.round())
                     .orElseGet(RuleProposal::new);
             p.setTaskId(taskId);
             p.setProposalKey(i.proposalKey());
+            p.setVersion(i.versionOrDefault());
             p.setRound(i.round());
             p.setReqKey(i.reqKey());
             p.setProductId(i.productId());
@@ -94,6 +96,9 @@ public class AgentResultService {
             p.setFollowUp(i.followUp() == null ? List.of() : List.copyOf(i.followUp()));
             p.setVerifyStatus(i.verifyStatus() == null ? RuleProposal.VerifyStatus.PENDING : i.verifyStatus());
             p.setVerifyLog(i.verifyLog());
+            p.setRevisionOutcome(i.revisionOutcomeOrDefault());
+            p.setRevisionResponse(i.revisionResponse());
+            p.setChangedFields(i.changedFields() == null ? List.of() : List.copyOf(i.changedFields()));
             proposals.save(p);
         }
         return nonNull(items).size();

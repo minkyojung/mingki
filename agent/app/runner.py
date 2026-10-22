@@ -85,6 +85,9 @@ class AgentRunner:
         if listener is None and self.on_update is None:
             return self.graph.invoke(value, config)
         if listener is not None:
+            if hasattr(listener, "restore"):
+                # thread 잠금 안에서 같은 체크포인트를 읽는다. 새 Bridge 와 /continue 모두에 적용한다.
+                listener.restore(self.graph.get_state(config).values)
             # 노드가 도구 호출 · 판단을 작업 기록으로 남기도록 호출 단위로 넘긴다 (job_reader와 같은 방식)
             config = {**config, "configurable": {**config["configurable"], "recorder": listener}}
         on_update = listener.node_updated if listener else self.on_update
@@ -143,9 +146,14 @@ class AgentRunner:
             raise DecisionError("현재는 상품별 제안 검토 단계입니다. 중간 요건 승인은 사용하지 않습니다")
         if not self.waiting_review(request.thread_id):
             raise NotWaitingError("승인을 기다리는 작업이 없습니다")
+        snapshot = self.graph.get_state(self.config(request.thread_id))
+        if snapshot.values["task_id"] != request.task_id:
+            raise DecisionError("다른 작업의 재개 요청입니다")
         try:
-            return review_decision(self.current_proposals(request.thread_id), request.decision, request.payload,
-                                   request.comment, approval_id=request.approval_id)
+            decision = review_decision(list(snapshot.values.get("proposals", [])), request.decision, request.payload,
+                                       request.comment, approval_id=request.approval_id)
+            validate_review(snapshot.values, decision)
+            return decision
         except ValueError as exc:
             raise DecisionError(str(exc)) from exc
 
