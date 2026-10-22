@@ -3,8 +3,8 @@ import { effectScope } from 'vue'
 
 import { ApiError } from '@/api/client'
 import * as api from '@/api/tasks'
-import type { TaskDetail, TaskStatus } from '@/api/types'
-import { useDemo } from './useDemo'
+import type { Proposal, TaskDetail, TaskEvent, TaskStatus } from '@/api/types'
+import { phaseOf, useDemo } from './useDemo'
 
 vi.mock('@/api/tasks', () => ({
   login: vi.fn(),
@@ -15,6 +15,7 @@ vi.mock('@/api/tasks', () => ({
   getRequirements: vi.fn(),
   getProposals: vi.fn(),
   approve: vi.fn(),
+  requestRevision: vi.fn(),
   resetDemo: vi.fn(),
 }))
 
@@ -149,5 +150,99 @@ describe('시연 흐름', () => {
     const calls = mocked.getTask.mock.calls.length
     await vi.advanceTimersByTimeAsync(5000)
     expect(mocked.getTask.mock.calls.length).toBe(calls)
+  })
+})
+
+/** 수정 요청 대상 제안 (요건 × 상품 하나) */
+const proposalV = (productId: string, version: number): Proposal => ({
+  proposalKey: `${productId}:DSR_LIMIT`,
+  reqKey: 'REQ-8',
+  productId,
+  productName: productId,
+  ruleId: 'R001',
+  impact: 'change_required',
+  unit: 'ratio',
+  currentValue: '0.40',
+  proposedValue: '0.35',
+  effectiveDate: '2026-12-01',
+  reason: '',
+  version,
+  verifyStatus: 'PASSED',
+  latest: true,
+  decision: null,
+  apply: null,
+})
+
+const resumed = (seq: number, decision: string): TaskEvent => ({
+  seq,
+  type: 'RESUMED',
+  payload: { decision },
+  createdAt: '',
+})
+
+describe('수정 요청', () => {
+  it('마지막 재개가 수정 요청이면 작업 중 상태를 다시 쓰는 중으로 본다', () => {
+    expect(phaseOf('DESIGNING', [resumed(1, 'REQUEST_CHANGES')])).toBe('revising')
+    expect(phaseOf('DESIGNING', [])).toBe('running')
+    expect(phaseOf('PUBLISHING', [resumed(1, 'APPROVE')])).toBe('publishing')
+    expect(phaseOf('WAITING_REVIEW', [resumed(1, 'REQUEST_CHANGES')])).toBe('review')
+  })
+
+  it('편집한 제안을 하나씩 보내고, 확인 대기로 돌아오면 다음을 보낸다', async () => {
+    const { demo } = setup()
+    statuses('WAITING_REVIEW')
+    mocked.latestTask.mockResolvedValue(detail('WAITING_REVIEW').task)
+    mocked.getProposals.mockResolvedValue({
+      canApprove: true,
+      proposals: [proposalV('P001', 1), proposalV('P002', 1)],
+    })
+    await demo.init()
+
+    statuses('DESIGNING', 'WAITING_REVIEW', 'DESIGNING', 'WAITING_REVIEW')
+    mocked.getEvents.mockResolvedValue([resumed(1, 'REQUEST_CHANGES')])
+    mocked.getProposals
+      .mockResolvedValueOnce({
+        canApprove: true,
+        proposals: [proposalV('P001', 2), proposalV('P002', 1)],
+      })
+      .mockResolvedValueOnce({
+        canApprove: true,
+        proposals: [proposalV('P001', 2), proposalV('P002', 2)],
+      })
+
+    const done = demo.revise([
+      { proposalId: 'REQ-8:P001', comment: '조치에 안내 문구 추가' },
+      { proposalId: 'REQ-8:P002', comment: '제안 문장 짧게' },
+    ])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(demo.phase.value).toBe('revising')
+    expect(mocked.requestRevision).toHaveBeenCalledTimes(1) // 처리 중에는 다음을 보내지 않는다
+    await vi.advanceTimersByTimeAsync(3000)
+    await done
+
+    expect(mocked.requestRevision.mock.calls).toEqual([
+      ['T1', { proposalId: 'REQ-8:P001', baseVersion: 1, comment: '조치에 안내 문구 추가' }],
+      ['T1', { proposalId: 'REQ-8:P002', baseVersion: 1, comment: '제안 문장 짧게' }],
+    ])
+    expect(demo.phase.value).toBe('review')
+    expect(demo.revising.value).toBeNull()
+    expect(demo.revisionErrors.value).toEqual({})
+  })
+
+  it('AI가 받지 않으면(버전 그대로) 그 제안에 이유를 남긴다', async () => {
+    const { demo } = setup()
+    mocked.latestTask.mockResolvedValue(detail('WAITING_REVIEW').task)
+    mocked.getProposals.mockResolvedValue({ canApprove: true, proposals: [proposalV('P001', 1)] })
+    mocked.getTask.mockResolvedValue({
+      ...detail('WAITING_REVIEW'),
+      errorMessage: '무엇을 바꿀지 구체적으로 적어주세요',
+    })
+    await demo.init()
+
+    await demo.revise([{ proposalId: 'REQ-8:P001', comment: '다시 써줘' }])
+    expect(demo.revisionErrors.value).toEqual({
+      'REQ-8:P001': '무엇을 바꿀지 구체적으로 적어주세요',
+    })
+    expect(demo.phase.value).toBe('review')
   })
 })
