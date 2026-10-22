@@ -23,7 +23,8 @@ public class Approval {
     /** 확인 단계. 사람 확인은 제안 검토 한 번뿐이다. Agent /resume 에 그대로 보낸다. */
     public enum Step { REVIEW }
 
-    public enum Decision { APPROVE, REJECT }
+    /** APPROVE · REJECT 는 최종 결정, REQUEST_CHANGES 는 제안 하나를 AI 가 다시 쓰게 하는 중간 요청 (10.3). */
+    public enum Decision { APPROVE, REJECT, REQUEST_CHANGES }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

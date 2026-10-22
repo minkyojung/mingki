@@ -35,7 +35,11 @@
         "화면 문구 \"DSR 40% 이내\" 수정 (doc://P001)",
         "심사 전산 한도 비율 변경"
       ],
+      "version": 1,
       "round": 2,
+      "revisionOutcome": "none",
+      "revisionResponse": null,
+      "changedFields": [],
       "verifyStatus": "PASSED",
       "verifyLog": null,
       "latest": true,
@@ -61,7 +65,11 @@
       "reason": "이미 개정 기준과 같음",
       "transition": null,
       "followUp": [],
+      "version": 1,
       "round": 2,
+      "revisionOutcome": "none",
+      "revisionResponse": null,
+      "changedFields": [],
       "verifyStatus": "PASSED",
       "verifyLog": null,
       "latest": true,
@@ -89,7 +97,11 @@
       "followUp": [
         "화면 문구 \"DSR 40퍼센트 이내라면\" 수정 (doc://P005)"
       ],
+      "version": 1,
       "round": 2,
+      "revisionOutcome": "none",
+      "revisionResponse": null,
+      "changedFields": [],
       "verifyStatus": "PASSED",
       "verifyLog": "1차: percent 규칙에 0.35를 제안해 단위 검사 실패",
       "latest": true,
@@ -117,7 +129,11 @@
       "followUp": [
         "상품 기획 담당자에게 현재 DSR 기준 확인"
       ],
+      "version": 1,
       "round": 2,
+      "revisionOutcome": "none",
+      "revisionResponse": null,
+      "changedFields": [],
       "verifyStatus": "PASSED",
       "verifyLog": null,
       "latest": true,

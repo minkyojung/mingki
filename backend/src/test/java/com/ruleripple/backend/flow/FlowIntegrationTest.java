@@ -36,6 +36,8 @@ import java.util.function.Predicate;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import org.mockito.ArgumentCaptor;
+import com.ruleripple.backend.task.Approval;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -185,6 +187,128 @@ class FlowIntegrationTest {
         assertThat(added.get(0).get("basisArticles").get(0).asText()).isEqualTo("credit-loan-ops/15-2");
     }
 
+    // ---------- 수정 요청 (10.3) ----------
+
+    @Test
+    void requestChangesRewritesOneProposalAndReturnsToReview() throws Exception {
+        UUID id = uploadAndReachReview();
+
+        // 접수: 확인 기록에 REQUEST_CHANGES, 작업은 DESIGNING, Agent 에 /resume
+        JsonNode accepted = read(mvc.perform(user(post("/api/ai/tasks/" + id + "/revisions")).contentType(MediaType.APPLICATION_JSON)
+                .content(contract("revisions.post.json"))).andExpect(status().isAccepted()));
+        long revisionId = accepted.get("revisionId").asLong();
+        assertThat(accepted.get("status").asText()).isEqualTo("DESIGNING");
+        assertThat(taskStatus(id)).isEqualTo("DESIGNING");
+        ArgumentCaptor<Approval> sent = ArgumentCaptor.forClass(Approval.class);
+        verify(agent, timeout(5000)).resume(any(), sent.capture());
+        assertThat(sent.getValue().getDecision()).isEqualTo(Approval.Decision.REQUEST_CHANGES);
+        assertThat(sent.getValue().getPayload()).containsEntry("proposalId", "REQ-8:P001").containsEntry("baseVersion", 1);
+        assertThat(getJson("/api/ai/tasks/" + id + "/revisions/" + revisionId).get("state").asText()).isEqualTo("processing");
+
+        // 다시 쓰는 동안 확인 · 두 번째 수정 요청은 409
+        mvc.perform(user(post("/api/ai/tasks/" + id + "/review")).contentType(MediaType.APPLICATION_JSON)
+                .content(contract("review.post.json"))).andExpect(status().isConflict());
+        mvc.perform(user(post("/api/ai/tasks/" + id + "/revisions")).contentType(MediaType.APPLICATION_JSON)
+                .content(contract("revisions.post.json"))).andExpect(status().isConflict());
+
+        // Agent: P001 만 2버전 1회차로 다시 쓰고, 검사 뒤 확인 대기
+        agentEvent(id, "STEP", Map.of("node", "proposal_agent"));
+        internal(put("/internal/tasks/" + id + "/proposals"), rewritten("P001:DSR_LIMIT", 2, "revised",
+                "필수 조치에 기존 계약 연장 안내를 넣었습니다", List.of("actions"))).andExpect(status().isOk());
+        agentEvent(id, "STEP", Map.of("node", "verify", "round", 1));
+        agentEvent(id, "APPROVAL_REQUIRED", Map.of("step", "REVIEW"));
+        assertThat(taskStatus(id)).isEqualTo("WAITING_REVIEW");
+
+        JsonNode proposals = getJson("/api/ai/tasks/" + id + "/proposals");
+        assertThat(proposals.get("latestRound").asInt()).isEqualTo(2);   // 다른 묶음은 아직 1버전 2회차. 현재 행 기준이다
+        assertThat(proposals.get("canApprove").asBoolean()).isTrue();
+        JsonNode current = null;
+        for (JsonNode p : proposals.get("proposals")) {
+            if ("P001:DSR_LIMIT".equals(p.get("proposalKey").asText()) && p.get("latest").asBoolean()) current = p;
+        }
+        assertThat(current).isNotNull();
+        assertThat(current.get("version").asInt()).isEqualTo(2);
+        assertThat(current.get("revisionOutcome").asText()).isEqualTo("revised");
+        assertThat(current.get("changedFields").get(0).asText()).isEqualTo("actions");
+        assertThat(current.get("followUp").get(0).asText()).contains("기존 계약 연장");
+
+        JsonNode revision = getJson("/api/ai/tasks/" + id + "/revisions/" + revisionId);
+        assertThat(revision.get("state").asText()).isEqualTo("done");
+        assertThat(revision.get("version").asInt()).isEqualTo(2);
+        assertThat(revision.get("outcome").asText()).isEqualTo("revised");
+        assertThat(revision.get("proposals")).hasSize(2);   // 1버전 2회차 + 2버전 1회차
+
+        // 새 버전을 보고 승인 → 반영 중. 확인 기록은 수정 요청 · 승인 두 줄
+        mvc.perform(user(post("/api/ai/tasks/" + id + "/review")).contentType(MediaType.APPLICATION_JSON)
+                .content(contract("review.post.json"))).andExpect(status().isOk());
+        assertThat(taskStatus(id)).isEqualTo("PUBLISHING");
+        JsonNode approvals = getJson("/api/ai/tasks/" + id).get("approvals");
+        assertThat(approvals).hasSize(2);
+        assertThat(approvals.get(0).get("decision").asText()).isEqualTo("REQUEST_CHANGES");
+        assertThat(approvals.get(1).get("decision").asText()).isEqualTo("APPROVE");
+    }
+
+    @Test
+    void revisionRequestChecksProposalVersionAndComment() throws Exception {
+        UUID id = uploadAndReachReview();
+        String path = "/api/ai/tasks/" + id + "/revisions";
+
+        mvc.perform(user(post(path)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"proposalId\":\"REQ-8:P001\",\"baseVersion\":2,\"comment\":\"안내 추가\"}")).andExpect(status().isConflict());
+        mvc.perform(user(post(path)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"proposalId\":\"REQ-8:P999\",\"baseVersion\":1,\"comment\":\"안내 추가\"}")).andExpect(status().isBadRequest());
+        mvc.perform(user(post(path)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"proposalId\":\"REQ-8:P003\",\"baseVersion\":1,\"comment\":\"안내 추가\"}")).andExpect(status().isBadRequest());   // 유지
+        mvc.perform(user(post(path)).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"proposalId\":\"REQ-8:P001\",\"baseVersion\":1,\"comment\":\" \"}")).andExpect(status().isBadRequest());
+        assertThat(taskStatus(id)).isEqualTo("WAITING_REVIEW");
+
+        // 같은 revisionId 재전송은 처음 접수를 돌려주고 Agent 를 다시 부르지 않는다. 내용이 다르면 409
+        String first = "{\"revisionId\":\"rev-1\",\"proposalId\":\"REQ-8:P001\",\"baseVersion\":1,\"comment\":\"안내 추가\"}";
+        JsonNode a = read(mvc.perform(user(post(path)).contentType(MediaType.APPLICATION_JSON).content(first)).andExpect(status().isAccepted()));
+        JsonNode b = read(mvc.perform(user(post(path)).contentType(MediaType.APPLICATION_JSON).content(first)).andExpect(status().isAccepted()));
+        assertThat(b.get("revisionId").asLong()).isEqualTo(a.get("revisionId").asLong());
+        mvc.perform(user(post(path)).contentType(MediaType.APPLICATION_JSON)
+                .content(first.replace("안내 추가", "다른 요청"))).andExpect(status().isConflict());
+        verify(agent, timeout(5000).times(1)).resume(any(), any());
+    }
+
+    @Test
+    void revisionTheAgentRefusesGoesBackToReview() throws Exception {
+        doThrow(HttpClientErrorException.create(HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY,
+                "{\"detail\":\"무엇을 바꿀지 구체적으로 적어주세요\"}".getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8))
+                .when(agent).resume(any(), any());
+        UUID id = uploadAndReachReview();
+        JsonNode accepted = read(mvc.perform(user(post("/api/ai/tasks/" + id + "/revisions")).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"proposalId\":\"REQ-8:P001\",\"baseVersion\":1,\"comment\":\"다시 써줘\"}")).andExpect(status().isAccepted()));
+
+        JsonNode task = await("/api/ai/tasks/" + id, false, t -> "WAITING_REVIEW".equals(t.at("/task/status").asText())
+                && !t.get("errorMessage").isNull());
+        assertThat(task.get("errorMessage").asText()).contains("수정 요청을 받지 않았습니다").contains("구체적으로");
+        assertThat(getJson("/api/ai/tasks/" + id + "/revisions/" + accepted.get("revisionId").asLong()).get("state").asText()).isEqualTo("rejected");
+        // 제안은 1버전 그대로이고 바로 승인할 수 있다
+        assertThat(getJson("/api/ai/tasks/" + id + "/proposals").get("canApprove").asBoolean()).isTrue();
+    }
+
+    @Test
+    void approvalChecksOnlyChosenProposals() throws Exception {
+        // P005 가 근거 검사에 실패한 채 확인 대기. 빼고 승인할 수 있고, 넣으면 409
+        JsonNode items = json.readTree(contract("proposals.put.json"));
+        for (JsonNode i : items.get("items")) {
+            if ("P005:DSR_LIMIT".equals(i.get("proposalKey").asText())) {
+                ((com.fasterxml.jackson.databind.node.ObjectNode) i).put("verifyStatus", "FAILED").put("verifyLog", "단위가 다릅니다");
+            }
+        }
+        UUID id = uploadAndReachReview(json.writeValueAsString(items));
+        assertThat(getJson("/api/ai/tasks/" + id + "/proposals").get("canApprove").asBoolean()).isTrue();
+
+        mvc.perform(user(post("/api/ai/tasks/" + id + "/review")).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"decision\":\"APPROVE\"}")).andExpect(status().isConflict());
+        mvc.perform(user(post("/api/ai/tasks/" + id + "/review")).contentType(MediaType.APPLICATION_JSON)
+                .content(contract("review.post.json"))).andExpect(status().isOk());
+        assertThat(taskStatus(id)).isEqualTo("PUBLISHING");
+    }
+
     // ---------- Agent 흉내 ----------
 
     /** 업로드 → 요건 → 영향 → 제안(기본은 계약 예시) → 검사 → 확인 대기. Agent 콜백 순서는 BACKEND_API 6절. */
@@ -211,6 +335,21 @@ class FlowIntegrationTest {
         agentEvent(id, "APPROVAL_REQUIRED", Map.of("step", "REVIEW"));
         assertThat(taskStatus(id)).isEqualTo("WAITING_REVIEW");
         return id;
+    }
+
+    /** 수정 요청 뒤 Agent 가 보내는 제안 저장: 계약 예시의 한 행을 새 버전 1회차로, 수정 요청 칸을 채워서. */
+    private String rewritten(String key, int version, String outcome, String response, List<String> changed) throws Exception {
+        JsonNode items = json.readTree(contract("proposals.put.json"));
+        for (JsonNode i : items.get("items")) {
+            if (key.equals(i.get("proposalKey").asText())) {
+                var row = (com.fasterxml.jackson.databind.node.ObjectNode) i;
+                row.put("version", version).put("round", 1).put("revisionOutcome", outcome).put("revisionResponse", response);
+                row.putArray("changedFields").add(changed.get(0));
+                row.putArray("followUp").add("기존 계약 연장은 종전 0.40 이 적용된다고 안내").add("심사 전산 한도 비율 변경");
+                return json.writeValueAsString(Map.of("items", List.of(row)));
+            }
+        }
+        throw new AssertionError("예시에 없는 키: " + key);
     }
 
     private void agentEvent(UUID id, String type, Map<String, Object> payload) throws Exception {

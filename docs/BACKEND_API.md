@@ -272,7 +272,7 @@ EXTRACTING ─▶ LOCATING ─▶ DESIGNING ⇄ VERIFYING ─▶ WAITING_REVIEW 
 - `{task, maxVerifyRounds, latestRound, canApprove, proposals[]}`
 - `proposals`는 버전 · 회차 전체이고 현재 것은 `latest:true`. 서버가 `productName`(products 조인), `decision`(`APPLY` · `EXCLUDE` · null), 반영 결과 `apply {jobId, status, closedRuleId, newRuleId}`를 붙인다. 이전 버전 행은 화면이 변경 전후 비교에 쓴다.
 - 현재 제안 = 제안 묶음(`reqKey` × `productId`)마다 가장 높은 `version`, 그 안에서 가장 높은 `round`의 행. 다시 쓴 버전 · 회차에서 빠진 규칙 행은 이전 것에 남지만 현재 제안이 아니다 (키마다 최고를 고르면 1회차에만 있던 `FAILED` 행이 승인을 영원히 막는다).
-- `latestRound`는 현재 버전 안의 최고 회차다.
+- `latestRound`는 현재 제안 행들의 최고 회차다. 이전 버전 행은 세지 않는다.
 - `canApprove`: `WAITING_REVIEW` + 현재 `change_required` 제안 중 `PASSED`가 1건 이상. 승인 요청은 반영으로 고른 제안만 검사한다 (10.3).
 
 ### 10.3 사용자 확인
@@ -316,7 +316,7 @@ EXTRACTING ─▶ LOCATING ─▶ DESIGNING ⇄ VERIFYING ─▶ WAITING_REVIEW 
 | `needs_clarification` | 모호하거나 대상 재판단 요청. 본문은 이전 그대로, `revisionResponse`에 확인할 질문 | 가능 (이전 본문), 또는 제외 |
 | `failed` | 두 번 써도 검사 실패. 본문은 이전으로 되돌림, `verifyStatus: FAILED` | 그 제안은 불가, 제외만 |
 
-- `GET /api/ai/tasks/{id}/revisions/{revisionId}`: 접수 내용과 결과. `state`는 `processing`(작업이 `DESIGNING` · `VERIFYING`) · `done`(새 버전 행이 있음) · `rejected`(Agent가 받지 않음, 아래). `proposals`는 그 제안 묶음의 이전 · 새 버전 행.
+- `GET /api/ai/tasks/{id}/revisions/{revisionId}`: 접수 내용과 결과. `state`는 `processing`(작업이 `DESIGNING` · `VERIFYING`) · `done`(새 버전 행이 있음) · `rejected`(Agent가 받지 않음, 아래) · `failed`(작업이 `FAILED`). `proposals`는 그 제안 묶음의 이전 · 새 버전 행.
 - 처리 중에는 확인 API가 409다 (`WAITING_REVIEW`가 아니므로). 수정 요청 뒤의 승인은 새 버전 기준이다. 수정 요청 전에 만든 승인 기록은 뒤에 온 결정 때문에 반영에 쓸 수 없다 (10.4 `ApprovalGuard`).
 - Agent 재개: `POST /resume {step:"REVIEW", decision:"REQUEST_CHANGES", comment, payload:{proposalId, baseVersion}}`. Agent는 그래프를 돌리기 전에 거부할 수 있다: 검토 대기 thread가 아니면 409, `proposalId`가 없거나 버전이 다르거나 `comment`가 모호("다시 써줘" · "수정해줘")하면 400. 400이면 백엔드는 확인 대기로 되돌리고 사유를 `errorMessage`에 남긴다 (아래 Agent 400 규칙과 같다). 409 · 연결 실패는 FAILED이고 "다시 시도"가 수정 요청을 다시 보낸다.
 - **반려는 작업을 끝낸다.** "다시 시도" 대상이 아니다. 같은 규정 · 같은 데이터로 다시 올리면 같은 판정이 나온다 (의도한 재현성). 결과를 바꾸는 길은 셋이다.

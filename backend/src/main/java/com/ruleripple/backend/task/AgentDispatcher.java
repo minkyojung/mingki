@@ -54,10 +54,14 @@ public class AgentDispatcher {
         } catch (HttpClientErrorException.BadRequest notAccepted) {
             // 결정이 Agent 의 현재 제안과 맞지 않는다. Agent 는 그대로 확인을 기다리므로 FAILED 대신 확인 대기로
             log.warn("agent did not accept review task={} : {}", taskId, notAccepted.getMessage());
-            service.reviewNotAccepted(taskId, AgentClient.detail(notAccepted));
+            service.reviewNotAccepted(taskId, decisionOf(approvalId), AgentClient.detail(notAccepted));
         } catch (Exception e) {
             log.warn("agent resume failed task={} : {}", taskId, e.getMessage());
             events.append(taskId, "FAILED", Map.<String, Object>of("reason", "Agent 재개 실패: " + e.getMessage()));
         }
+    }
+
+    private Approval.Decision decisionOf(Long approvalId) {
+        return approvals.findById(approvalId).map(Approval::getDecision).orElse(Approval.Decision.APPROVE);
     }
 }
