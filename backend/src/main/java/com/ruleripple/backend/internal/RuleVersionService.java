@@ -70,7 +70,7 @@ public class RuleVersionService {
         if (!keys(approval.getPayload(), "approvedProposalKeys").contains(r.proposalKey())) {
             throw forbidden("확인에서 반영으로 고른 제안이 아닙니다: " + r.proposalKey());
         }
-        RuleProposal p = Proposals.latest(proposals.findByTaskIdOrderByProposalKeyAscRoundAsc(r.taskId())).stream()
+        RuleProposal p = Proposals.latest(proposals.findByTaskIdOrderByProposalKeyAscVersionAscRoundAsc(r.taskId())).stream()
                 .filter(x -> x.getProposalKey().equals(r.proposalKey())).findFirst()
                 .orElseThrow(() -> forbidden("없는 제안입니다: " + r.proposalKey()));
         if (!Proposals.CHANGE_REQUIRED.equals(p.getImpact()) || p.getVerifyStatus() != RuleProposal.VerifyStatus.PASSED) {

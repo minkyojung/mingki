@@ -185,7 +185,7 @@ def _message(delta):
 
 def report_payload(result):
     data = result.model_dump(mode="json")
-    lines = ["# Rule Ripple 상품 변경 제안서", "", f"**{result.status}** · {result.summary}"]
+    lines = ["# Dumbo 상품 변경 제안서", "", f"**{result.status}** · {result.summary}"]
     for p in result.proposals:
         mark = {"approved": "반영", "rejected": "제외"}.get(p.status, p.status)
         lines += ["", f"## {p.product_name} ({p.product_id}) — {mark}", "",

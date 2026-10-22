@@ -86,7 +86,7 @@ def create_app(
         log.warning("INTERNAL_TOKEN 이 공개된 개발용 기본값입니다. 운영 배포에서는 반드시 바꾸세요")
     if submit is None:
         submit = ThreadPoolExecutor(max_workers=4, thread_name_prefix="agent-task").submit
-    app = FastAPI(title="Rule Ripple Agent")
+    app = FastAPI(title="Dumbo Agent")
 
     def authorize(value):
         if value != token:

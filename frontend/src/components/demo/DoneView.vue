@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { Briefing } from '@/lib/briefing'
 import { formatDate } from '@/lib/briefing'
+import RippleMark from './RippleMark.vue'
 
 const props = defineProps<{ applied: Briefing; status: TaskStatus; busy: boolean }>()
 const emit = defineEmits<{ restart: [] }>()
@@ -21,11 +22,11 @@ const title = computed(() => {
 </script>
 
 <template>
-  <section class="pt-20">
-    <div class="grid size-12 place-items-center rounded-full bg-emerald-500 text-white">
-      <CheckIcon class="size-6" />
-    </div>
-    <h1 class="mt-6 text-3xl font-bold">{{ title }}</h1>
+  <section class="stage">
+    <RippleMark class="self-start">
+      <CheckIcon class="size-4" stroke-width="3" />
+    </RippleMark>
+    <h1 class="mt-8 text-[2rem] leading-tight font-bold">{{ title }}</h1>
     <p v-if="applied.groups.length" class="mt-2 text-muted-foreground">
       {{ formatDate(applied.effectiveDate) }}부터 새 규칙이 적용돼요
     </p>
@@ -38,9 +39,9 @@ const title = computed(() => {
         <ChevronRightIcon class="size-4 transition-transform group-data-[state=open]:rotate-90" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <Card class="mt-3 py-4">
-          <CardContent class="space-y-2.5 px-4">
-            <p v-for="group in applied.groups" :key="group.reqKey" class="flex gap-4">
+        <Card class="mt-3 rounded-2xl py-2 ring-foreground/5">
+          <CardContent class="divide-y px-5">
+            <p v-for="group in applied.groups" :key="group.reqKey" class="flex gap-4 py-3">
               <span>
                 {{ group.title }}
                 {{
@@ -51,7 +52,9 @@ const title = computed(() => {
                       : ''
                 }}
               </span>
-              <span class="ml-auto text-muted-foreground">{{ group.rows.length }}개</span>
+              <span class="ml-auto font-medium text-brand tabular-nums">
+                {{ group.rows.length }}개
+              </span>
             </p>
           </CardContent>
         </Card>
@@ -61,7 +64,7 @@ const title = computed(() => {
     <Button
       variant="outline"
       size="lg"
-      class="mt-10 h-14 w-full rounded-xl text-base"
+      class="mt-12 h-14 w-full rounded-2xl text-base"
       :disabled="busy"
       @click="emit('restart')"
     >

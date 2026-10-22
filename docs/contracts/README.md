@@ -9,6 +9,7 @@
 | `proposals.put.json` | Agent → Spring | `PUT {callbackBaseUrl}/proposals` |
 | `review.post.json` | 화면 → Spring | `POST /api/ai/tasks/{id}/review` (일부 제외하고 승인) |
 | `review.post.reject.json` | 화면 → Spring | 같은 API로 반려. `comment` 필수 |
+| `revisions.post.json` | 화면 → Spring | `POST /api/ai/tasks/{id}/revisions` (제안 하나 수정 요청, 10.3) |
 | `apply.post.json` | business-mcp → Spring | `POST /internal/product-rules/versions` |
 | `apply.job.json` | Spring → business-mcp · Agent | `GET /internal/jobs/{jobId}` 결과 |
 | `rule-keys.get.json` | Spring → business-mcp | `GET /internal/product-rules/keys` |

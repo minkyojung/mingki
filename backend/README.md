@@ -1,4 +1,6 @@
-# Rule Ripple · Backend
+# Dumbo · Backend
+
+> 서비스 이름은 Dumbo다. 패키지(`com.ruleripple`) · 설정 키(`ruleripple.*`) · DB 이름 · 큐 이름(`rr.jobs.*`) 같은 내부 식별자는 초기 이름 Rule Ripple을 그대로 쓴다.
 
 Spring Boot 3.3 · Java 21 · PostgreSQL 16 · RabbitMQ
 

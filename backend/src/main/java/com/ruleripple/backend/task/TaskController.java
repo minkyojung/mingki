@@ -34,7 +34,9 @@ import java.util.UUID;
  *   getRequirements(id)              → GET  /api/ai/tasks/{id}/requirements      (바뀐 조항 · 요건)
  *   getProposals(id)                 → GET  /api/ai/tasks/{id}/proposals          (상품 × 규칙 변경 제안)
  *   getContractImpacts(id)           → GET  /api/ai/tasks/{id}/contract-impacts   (경과조치 계약)
- *   reviewProposals(id, decision)    → POST /api/ai/tasks/{id}/review            (사람 확인 1번)
+ *   reviewProposals(id, decision)    → POST /api/ai/tasks/{id}/review            (최종 확인 1번)
+ *   requestRevision(id, r)           → POST /api/ai/tasks/{id}/revisions         (제안 하나를 AI 가 다시 쓰게) → 202
+ *   getRevision(id, rid)             → GET  /api/ai/tasks/{id}/revisions/{rid}
  *   retryTask(id)                    → POST /api/ai/tasks/{id}/retry             ("다시 시도": Agent 가 죽었거나 호출에 실패한 작업)
  *   getReport(id)                    → GET  /api/ai/tasks/{id}/report
  *   getEvaluation(id)                → GET  /api/ai/tasks/{id}/evaluation
@@ -48,6 +50,8 @@ public class TaskController {
 
     public record CreateResponse(UUID taskId, String status) {}
     public record ReviewRequest(Approval.Decision decision, String comment, List<String> excludedProposalKeys) {}
+    /** revisionId 는 화면의 재전송 식별자다. 없어도 된다 (10.3). */
+    public record RevisionRequest(String proposalId, Integer baseVersion, String comment, String revisionId) {}
 
     private final TaskService service;
     private final TaskEventService events;
@@ -123,7 +127,7 @@ public class TaskController {
         });
         Map<String, ApplyResult> applied = service.applyResults(id);
         Map<String, String> names = service.productNames();
-        int latestRound = all.stream().mapToInt(RuleProposal::getRound).max().orElse(0);
+        int latestRound = latest.stream().mapToInt(RuleProposal::getRound).max().orElse(0);
         return new ProposalsResponse(TaskSummary.of(t), MAX_VERIFY_ROUNDS, latestRound,
                 Proposals.canApprove(t.getStatus(), latest),
                 all.stream().map(p -> {
@@ -153,6 +157,22 @@ public class TaskController {
         Approval a = service.review(id, me, req.decision(), req.comment(), req.excludedProposalKeys());
         dispatcher.resume(id, a.getId());
         return service.approvalView(a);
+    }
+
+    // ---------- 수정 요청 (10.3) ----------
+
+    /** 접수하면 작업은 DESIGNING 이 되고 Agent 가 그 제안만 다시 쓴다. 같은 revisionId 를 다시 보내면 처음 접수를 돌려준다. */
+    @PostMapping("/{id}/revisions")
+    public ResponseEntity<RevisionAccepted> requestRevision(@AuthenticationPrincipal AuthUser me, @PathVariable UUID id,
+                                                            @RequestBody RevisionRequest req) {
+        TaskService.RevisionReceipt r = service.requestRevision(id, me, req.proposalId(), req.baseVersion(), req.comment(), req.revisionId());
+        if (!r.duplicate()) dispatcher.resume(id, r.approval().getId());
+        return ResponseEntity.accepted().body(new RevisionAccepted(r.approval().getId(), r.proposalId(), r.baseVersion(), r.status()));
+    }
+
+    @GetMapping("/{id}/revisions/{revisionId}")
+    public RevisionView revision(@PathVariable UUID id, @PathVariable Long revisionId) {
+        return service.revision(id, revisionId);
     }
 
     /**
@@ -198,14 +218,14 @@ public class TaskController {
             agent.continueTask(task);
             return "continue";
         } catch (HttpClientErrorException.Conflict notContinuable) {
-            Optional<Approval> approve = service.latestApprove(task.getId());
-            if (approve.isPresent()) {
+            Optional<Approval> resumable = service.latestResumable(task.getId());
+            if (resumable.isPresent()) {
                 try {
-                    agent.resume(task, approve.get());
+                    agent.resume(task, resumable.get());
                     return "resume";
                 } catch (HttpClientErrorException.BadRequest notAccepted) {
-                    // Agent 가 저장된 승인을 받지 않았다. Agent 는 확인을 기다리므로 사람이 다시 결정하게 둔다
-                    service.reviewNotAccepted(task.getId(), agentMessage(notAccepted));
+                    // Agent 가 저장된 승인 · 수정 요청을 받지 않았다. Agent 는 확인을 기다리므로 사람이 다시 결정하게 둔다
+                    service.reviewNotAccepted(task.getId(), resumable.get().getDecision(), agentMessage(notAccepted));
                     return "waiting";
                 }
             }
