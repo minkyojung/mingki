@@ -170,6 +170,27 @@ def definition_without_rule(requirement, rules):
     return f"{article}의 정의를 따르는 규칙이 이 상품에 없음 (근거 조항 기준)"
 
 
+def definition_followers(requirement, rules):
+    """정의가 바뀐 요건에서 그 조항을 따르고(basisArticles) 옛 정의 값을 그대로 가진 규칙. 정의와 함께 새 값으로 바뀌어야 한다.
+
+    "더 엄격한 기준은 완화하지 않는다"는 한도 규칙의 원칙이다. 정의를 그대로 옮겨 적은 규칙은 한도가 아니라 정의다.
+    """
+    if requirement.change != "modified" or not _DEFINITION.search(requirement.new_text or ""):
+        return []
+    article = article_key(requirement.article_ref)
+    before = requirement.model_copy(update={"new_text": requirement.old_text})
+    out = []
+    for rule in rules:
+        if article not in (rule.get("basisArticles") or []):
+            continue
+        new, old = expected_value(requirement, rule["unit"]), expected_value(before, rule["unit"])
+        if new is None or old is None or same_value(new, old):
+            continue
+        if same_value(rule["value"], old):
+            out.append(rule)
+    return out
+
+
 def sale_ended_basis(context):
     """판매 중단 상품의 관리를 정한 조항 uri (유지 판정의 근거). 없으면 빈 목록."""
     return [a["uri"] for a in context if _SALE_ENDED_ARTICLE.search(a.get("text") or "")][:1]

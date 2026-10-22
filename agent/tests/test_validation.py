@@ -311,6 +311,13 @@ def test_changed_definition_only_touches_products_whose_rules_follow_it():
     assert definition_without_rule(SENIOR_DEF_REQ, unknown_ratio)                 # 비율 규칙은 나이 정의와 무관
     assert definition_without_rule(DSR_REQ, other) is None                         # 한도 변경은 정의가 아니다
 
+    from app.validation import definition_followers
+    assert [r["ruleId"] for r in definition_followers(SENIOR_DEF_REQ, follows)] == ["R010"]   # 65 를 그대로 옮겨 적은 규칙
+    seventy = [based(rule("R010", "ELIGIBLE_MIN_AGE", "70", "age"), "credit-loan-ops/15")]
+    assert definition_followers(SENIOR_DEF_REQ, seventy) == []                     # 정의와 다른 값이면 모델 판단
+    assert definition_followers(SENIOR_DEF_REQ, other) == []
+    assert definition_followers(DSR_REQ, follows) == []
+
 
 def test_products_without_a_rule_on_the_changed_definition_are_kept_in_the_graph():
     class HedgesOnDefinition(DsrReasoner):
@@ -319,19 +326,17 @@ def test_products_without_a_rule_on_the_changed_definition_are_kept_in_the_graph
 
         def product_impacts(self, requirements, products, rules, *args):
             out = []
+            # P002 는 "65세 자격이 60세 기준보다 엄격하니 변경 불필요"라며 보류하고, 나머지는 "계약할 수 있으니 반영 필요"라며 보류한다
             for p in products:
-                if p["productId"] == "P002":
-                    out.append(ProductAssessment(requirement_id="REQ-15", product_id="P002", impact="change_required",
-                                                 target_rule_ids=["R010"], evidence_rule_ids=["R010"], applicability="all",
-                                                 basis_refs=["reg://credit-loan-ops/v4/15"], scope="시행일 이후 신청", reason="가입 나이 65 → 60"))
-                else:
-                    out.append(ProductAssessment(requirement_id="REQ-15", product_id=p["productId"], impact="needs_review",
-                                                 applicability="unknown", basis_refs=["reg://credit-loan-ops/v4/15"],
-                                                 scope="확인", reason="나이 상한이 없어 고령자와 계약할 수 있으니 반영 필요"))
+                out.append(ProductAssessment(requirement_id="REQ-15", product_id=p["productId"], impact="needs_review",
+                                             applicability="unknown", basis_refs=["reg://credit-loan-ops/v4/15"],
+                                             scope="확인", reason="확정할 수 없음"))
             return out
     out = AgentRunner(build_graph(LocalTools(), HedgesOnDefinition())).start("T1", "credit-loan-ops", article_ids=["15"])
     impacts = {i.product_id: i for i in out["product_impacts"]}
+    # 제15조를 따르며 옛 값 65 를 가진 R010 은 정의와 함께 60 으로 바뀐다
     assert impacts["P002"].impact == "change_required" and impacts["P002"].target_rule_ids == ["R010"]
+    assert "정의와 함께 바뀜" in impacts["P002"].reason
     for pid in ("P001", "P005", "P007", "P011"):
         assert impacts[pid].impact == "no_change" and impacts[pid].applicability == "excluded", pid
         assert "reg://credit-loan-ops/v4/15" in impacts[pid].basis_refs and "정의를 따르는 규칙" in impacts[pid].reason

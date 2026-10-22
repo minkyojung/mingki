@@ -5,8 +5,8 @@ from app.schemas import Event, ProductImpact, ProductAssessment
 from app.data import active_rules, unended_rules
 from app.lookups import MAX_LOOKUPS, run_lookups
 from app.tools.base import recorder_of, recording
-from app.validation import (applied_new_rule, change_problem, changeable_rules, definition_without_rule, excluded_by_age,
-                            exemption_needs_customer_data, ground_conditions, condition_errors, sale_ended_basis)
+from app.validation import (applied_new_rule, change_problem, changeable_rules, definition_followers, definition_without_rule,
+                            excluded_by_age, exemption_needs_customer_data, ground_conditions, condition_errors, sale_ended_basis)
 
 
 def code_checks(model_reason, reason):
@@ -121,6 +121,18 @@ def make_product_impact_agent(tools, reasoner):
                     evidence_ids = list(dict.fromkeys(evidence_ids + target_ids + kept_evidence))
                     basis = list(dict.fromkeys(basis + kept_basis))
                     target_ids, conditions, impact, applicability = [], [], "no_change", "excluded"
+                # 바뀐 정의를 그대로 옮겨 적은 규칙(그 조항을 따르고 옛 값을 가진 규칙)은 정의와 함께 바뀐다.
+                # "더 엄격한 기준은 완화하지 않는다"는 한도의 원칙이지 정의의 원칙이 아니다
+                followers = [] if kept else definition_followers(req, product_rules)
+                if followers and set(r["ruleId"] for r in followers) != set(target_ids):
+                    names = ", ".join(f"{r['ruleId']} {r['ruleKey']}={r['value']}" for r in followers)
+                    reason += f" / {names}: {req.article}의 정의를 따르는 규칙이라 정의와 함께 바뀜"
+                    target_ids = [r["ruleId"] for r in followers]
+                    evidence_ids = [rid for rid in evidence_ids if rid not in target_ids]
+                    basis = list(dict.fromkeys(basis + ([req.article_ref] if req.article_ref in articles else [])))
+                    impact = "change_required"
+                    if applicability == "unknown":
+                        applicability = "all"
                 # 바꿀 수 있는 규칙이 없으면 상품 규칙은 유지다. 차주별 조건 확인은 심사 절차의 일이다
                 changeable = changeable_rules(req, list(by_product[pid].values()), product)
                 if impact == "no_change" and changeable and exemption_needs_customer_data(req, list(by_product[pid].values())):
